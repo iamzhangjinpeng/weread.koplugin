@@ -8,8 +8,9 @@ local FocusNav = require("weread.ui.focus_nav")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local LineWidget = require("ui/widget/linewidget")
+local IconWidget = require("ui/widget/iconwidget")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
@@ -20,6 +21,7 @@ local I18n = require("weread.lib.i18n")
 
 local Screen = Device.screen
 local _ = I18n.tr
+local icons_dir = debug.getinfo(1, "S").source:match("^@(.*/)") .. "../../icons/"
 
 local MyView = FocusManager:extend{
     account = nil,
@@ -57,25 +59,30 @@ function MyView:init()
     local nav, nav_buttons = HomeNav.create("me", self, function(route)
         if self.on_home_nav then self.on_home_nav(route, self) end
     end)
+    local avatar_size = Screen:scaleBySize(52)
+    local account_text_width = math.max(1, self.screen_w - 3 * Size.padding.large - avatar_size)
     local name = TextWidget:new{
         text = account_name,
         face = Font:getFace("cfont", 24),
-        max_width = self.screen_w - 2 * Size.padding.large,
+        max_width = account_text_width,
     }
     local status = TextWidget:new{
         text = self.account_status or _("WeRead account"),
         face = Font:getFace("cfont", 17),
-        max_width = self.screen_w - 2 * Size.padding.large,
+        max_width = account_text_width,
     }
 
     local content = VerticalGroup:new{
         align = "left",
         HorizontalSpan:new{ width = self.screen_w },
         VerticalSpan:new{ width = Size.padding.large },
-        TextWidget:new{
-            text = _("My"),
-            face = Font:getFace("tfont", 26),
-            max_width = self.screen_w - 2 * Size.padding.large,
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = Size.padding.large },
+            TextWidget:new{
+                text = _("My"),
+                face = Font:getFace("tfont", 26),
+                max_width = self.screen_w - 2 * Size.padding.large,
+            },
         },
         VerticalSpan:new{ width = Size.padding.large },
         FrameContainer:new{
@@ -83,15 +90,27 @@ function MyView:init()
             bordersize = 0,
             padding = Size.padding.large,
             margin = 0,
-            VerticalGroup:new{
-                align = "left",
-                name,
-                VerticalSpan:new{ width = Size.padding.small },
-                status,
+            HorizontalGroup:new{
+                align = "center",
+                IconWidget:new{
+                    file = icons_dir .. "account-avatar.svg",
+                    width = avatar_size,
+                    height = avatar_size,
+                },
+                HorizontalSpan:new{ width = Size.padding.large },
+                VerticalGroup:new{
+                    align = "left",
+                    name,
+                    VerticalSpan:new{ width = Size.padding.small },
+                    status,
+                },
             },
         },
         VerticalSpan:new{ width = Size.padding.large },
-        exit_button,
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = Size.padding.large },
+            exit_button,
+        },
     }
 
     self.exit_button = exit_button
