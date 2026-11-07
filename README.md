@@ -1,12 +1,21 @@
 # WeRead KOReader Plugin
 
+这是 [finlater/weread.koplugin](https://github.com/finlater/weread.koplugin) 的个人 fork。当前界面改造位于 [`feature/weread-home`](https://github.com/iamzhangjinpeng/weread.koplugin/tree/feature/weread-home) 分支；本版基于原项目 1.7.0，标记为 **1.6.99**，便于需要时通过插件内的在线更新恢复原版。
+
+## 本分支的界面
+
+- 手动打开微信读书后进入书架；书架、阅读统计和“我的”页面底部提供相同的栏目切换。
+- “我的”显示账号名称和状态，并可退出微信读书页面，返回进入前的 KOReader 界面。
+- 统计原有入口也会显示底栏。书架数据、统计、下载、进度同步和阅读仍沿用原插件的处理方式。
+- 书架可使用原有的列表或封面模式，按原设置排序；本版没有新增单独的“继续阅读”卡片。
+
 > **免责声明**：本项目仅供个人学习和技术研究使用，不得用于商业用途。使用本项目所产生的一切后果（包括但不限于账号封禁、数据丢失等）由使用者自行承担，项目作者概不负责。请遵守微信读书的用户协议和相关法律法规。
 
 在 KOReader 上阅读微信读书中的书籍、公众号文章的插件。支持同步进度同步，阅读时长同步和统计，查看书评、划线和想法。让Kindle、Kobo等封闭系统设备也能体验微信读书！
 
 ## 想要更完整的微信读书体验？试试 WeReader 闭源版
 
-除了本仓库的 **WeRead 开源版**，我也在开发 **WeReader 闭源版**：采用微信读书墨水屏 App 风格的界面，提供书城与推荐、更精确的阅读进度同步、离线阅读上报，以及划线、写想法、评论、点赞等互动功能，适合希望在阅读器上获得更完整微信读书体验的朋友。
+除了本仓库的 **WeRead 开源版**，原项目作者也开发了 **WeReader 闭源版**：采用微信读书墨水屏 App 风格的界面，提供书城与推荐、更精确的阅读进度同步、离线阅读上报，以及划线、写想法、评论、点赞等互动功能，适合希望在阅读器上获得更完整微信读书体验的朋友。
 
 **欢迎在小红书观看演示视频，也可以在小红书或闲鱼请作者喝一杯咖啡。** 两个平台的昵称都是 **finlater**，感谢你对个人开发的支持。
 
@@ -53,7 +62,7 @@ WeReader 闭源版不包含微信读书会员或付费书籍；可阅读内容�
 
 > ⚠️ 建议使用 **KOReader 2026.03 或更高版本**。旧版本可能无法正常加载或使用插件，例如「工具」菜单中找不到「微信读书」。详见 [#14](https://github.com/finlater/weread.koplugin/issues/14)。
 
-1. 前往 [GitHub Releases](https://github.com/finlater/weread.koplugin/releases) 下载最新的 `weread.koplugin-vX.Y.Z.zip` 安装包。
+1. 前往 [本 fork 的发行页面](https://github.com/iamzhangjinpeng/weread.koplugin/releases/tag/v1.6.99) 下载 `weread.koplugin-v1.6.99.zip` 安装包。
 2. 解压安装包，得到 `weread.koplugin` 文件夹。
 3. 将该文件夹复制到 KOReader 的 `plugins` 目录：
 
@@ -67,7 +76,9 @@ koreader/plugins/weread.koplugin/
 工具 → 微信读书
 ```
 
-后续更新插件可在 **微信读书 → 设置 → 更新管理** 菜单中在线更新。
+### 恢复原项目版本
+
+此分支保留原项目的在线更新器。打开 **工具 → 微信读书 → 设置 → 关于 → 检查更新**，确认安装原项目 1.7.0 或更新的正式版并重启 KOReader，即可回到原项目界面。安装后设备上的本分支界面改动会被替换；GitHub 上的分支仍会保留。
 
 ## 登录与认证
 
