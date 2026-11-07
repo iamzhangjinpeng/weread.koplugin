@@ -43,6 +43,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local FocusNav = require("weread.ui.focus_nav")
+local HomeNav = require("weread.ui.home_nav")
 local I18n = require("weread.lib.i18n")
 local T = require("ffi/util").template
 
@@ -121,6 +122,8 @@ local ReadStatsView = FocusManager:extend{
     on_prev = nil,
     on_next = nil,
     on_switch = nil,
+    on_home_nav = nil,
+    on_closed = nil,
 }
 
 function ReadStatsView:faces()
@@ -543,21 +546,25 @@ function ReadStatsView:init()
         title_multilines = true,
         align = "center",
         with_bottom_line = true,
-        close_callback = function() self:onClose() end,
         show_parent = self,
     }
 
     local tab_bar = self:buildTabBar()
     local nav_row = self:buildNavRow()
+    local home_nav, home_nav_buttons = HomeNav.create("stats", self, function(route)
+        if self.on_home_nav then self.on_home_nav(route, self) end
+    end)
 
     local rows = { self._tab_buttons }
     if nav_row then rows[#rows + 1] = self._nav_buttons end
+    rows[#rows + 1] = home_nav_buttons
     FocusNav.apply(self, rows)
     FocusNav.initialFocus(self, 1, 1)
 
     local top_h = self.title_bar:getHeight() + tab_bar:getSize().h
     local nav_h = nav_row and nav_row:getSize().h or 0
-    local scroll_h = self.screen_h - top_h - nav_h
+    local home_nav_h = home_nav:getSize().h
+    local scroll_h = math.max(1, self.screen_h - top_h - nav_h - home_nav_h)
 
     local scroll = ScrollableContainer:new{
         dimen = Geom:new{ w = self.screen_w, h = scroll_h },
@@ -578,6 +585,7 @@ function ReadStatsView:init()
     if nav_row then
         table.insert(body, nav_row)
     end
+    table.insert(body, home_nav)
 
     self[1] = FrameContainer:new{
         background = Blitbuffer.COLOR_WHITE,
@@ -595,6 +603,7 @@ function ReadStatsView:onShow()
 end
 
 function ReadStatsView:onCloseWidget()
+    if self.on_closed then self.on_closed(self) end
     UIManager:setDirty(nil, function() return "ui", self.dimen end)
 end
 
@@ -637,6 +646,8 @@ function M.show(data, callbacks)
         on_prev = callbacks.on_prev,
         on_next = callbacks.on_next,
         on_switch = callbacks.on_switch,
+        on_home_nav = callbacks.on_home_nav,
+        on_closed = callbacks.on_closed,
     }
     UIManager:show(view)
     return view

@@ -2,6 +2,7 @@
 local logger = require("weread.lib.logger")
 local ReadStats = require("weread.lib.read_stats")
 local ReadStatsView = require("weread.ui.read_stats_view")
+local HomeRequest = require("weread.ui.home_request")
 local UIManager = require("ui/uimanager")
 
 local PluginUtil = require("weread.lib.plugin_util")
@@ -235,31 +236,42 @@ function M:showReadReportBookPicker()
     })
 end
 
-function M:showReadStats()
+function M:showReadStats(old_view)
+    old_view = old_view or self.home_view
     if not self:requireLogin(false, true) then
         return
     end
     -- Open on the monthly tab by default.
-    self:loadReadStats("monthly", nil, nil)
+    self:loadReadStats("monthly", nil, old_view)
 end
 
 -- Fetch reading statistics for a period and (re)show the visualization page.
 -- old_view, when provided, is closed once the new data is ready (tab switch or
 -- period navigation).
 function M:loadReadStats(mode, base_time, old_view)
+    local generation = HomeRequest.begin(self)
     self:showBusy(_("Loading reading statistics..."))
+    local busy_message = self.busy_message
     self:runOnlineTask(_("Reading statistics"), function()
+        if not HomeRequest.isCurrent(self, generation) then
+            if self.busy_message == busy_message then self:closeBusy() end
+            return
+        end
         local ok, data = pcall(function()
             return ReadStats.fetch(self.client, mode, base_time)
         end)
-        self:closeBusy()
+        if self.busy_message == busy_message then self:closeBusy() end
+        if not HomeRequest.isCurrent(self, generation) then return end
         if not ok then
             logger.err("load reading statistics failed:", log_error(data))
             self:showInfo(T(_("%1 failed:\n%2"), _("Reading statistics"), display_error(data)))
             return
         end
-        if old_view then
-            UIManager:close(old_view)
+        -- Cover downloads can redraw the source shelf while this request waits.
+        -- Close the current shelf rather than its already-closed predecessor.
+        local source_view = old_view
+        if old_view and self.home_view == self.shelf_view and self.home_view ~= nil then
+            source_view = self.home_view
         end
         local view
         view = ReadStatsView.show(data, {
@@ -272,7 +284,16 @@ function M:loadReadStats(mode, base_time, old_view)
             on_switch = function(new_mode)
                 self:loadReadStats(new_mode, nil, view)
             end,
+            on_home_nav = function(page, current_view)
+                self:showWeReadHomePage(page, current_view)
+            end,
+            on_closed = function(closed_view)
+                self:forgetWeReadHomeView(closed_view)
+            end,
         })
+        self.read_stats_view = view
+        self.home_view = view
+        if source_view then self:closeWeReadHomeView(source_view) end
     end)
 end
 

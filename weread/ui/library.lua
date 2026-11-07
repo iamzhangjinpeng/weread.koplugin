@@ -5,6 +5,7 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local Content = require("weread.lib.content")
 local ShelfGroups = require("weread.lib.shelf_groups")
 local InputDialog = require("ui/widget/inputdialog")
+local HomeRequest = require("weread.ui.home_request")
 local logger = require("weread.lib.logger")
 local ProgressbarDialog = require("ui/widget/progressbardialog")
 local TextViewer = require("ui/widget/textviewer")
@@ -68,12 +69,13 @@ local function list_items_per_page()
     return math.max(4, perpage)
 end
 
-function M:showBookshelf()
+function M:showBookshelf(old_view)
+    old_view = old_view or self.home_view
     local cached = self.library_db and self.library_db:getShelf() or nil
     local archives = self.library_db and self.library_db:getShelfArchives() or nil
     if cached and (#cached > 0 or archives ~= nil) then
         self:applyShelfSnapshot(cached, archives)
-        self:showShelfView("books")
+        self:showShelfView("books", nil, old_view)
         local shelf = self.settings:get("shelf")
         -- Only old caches lack archive metadata; an empty archive is current.
         if archives == nil and not shelf.groups_refresh_hint_shown then
@@ -95,16 +97,20 @@ function M:showBookshelf()
         end
         return
     end
-    self:refreshBookshelf()
+    self:refreshBookshelf(old_view)
 end
 
 function M:closeWeReadUI()
+    HomeRequest.begin(self)
     -- Close from the topmost view down so no full-screen WeRead widget remains
     -- in UIManager's window stack after a document is opened.
     local seen = {}
     for _, field in ipairs({
         "_chapter_list_view",
         "_book_detail_view",
+        "read_stats_view",
+        "my_view",
+        "home_view",
         "shelf_view",
     }) do
         local view = self[field]
@@ -114,6 +120,20 @@ function M:closeWeReadUI()
             UIManager:close(view)
         end
     end
+end
+
+function M:forgetWeReadHomeView(view)
+    if not view then return end
+    if self.home_view == view then HomeRequest.begin(self) end
+    for _, field in ipairs({ "home_view", "shelf_view", "read_stats_view", "my_view" }) do
+        if self[field] == view then self[field] = nil end
+    end
+end
+
+function M:closeWeReadHomeView(view)
+    if not view then return end
+    self:forgetWeReadHomeView(view)
+    UIManager:close(view)
 end
 
 function M:onWeReadAccountChanged()
@@ -149,22 +169,30 @@ end
 
 function M:refreshBookshelf(old_view, view_options)
     if self.shelf_refreshing or not self:requireLogin(false, true) then return end
+    local generation = HomeRequest.begin(self)
     self.shelf_refreshing = true
     -- A finishing thumbnail batch must not replace the view being refreshed.
     self.shelf_cover_generation = (self.shelf_cover_generation or 0) + 1
     self.shelf_cover_pending = nil
-    if old_view then old_view:setRefreshing(true) end
+    if old_view and old_view.setRefreshing then old_view:setRefreshing(true) end
+    local busy_message
     local function done()
         self.shelf_refreshing = nil
-        if old_view then old_view:setRefreshing(false) end
-        self:closeBusy()
+        if old_view and old_view.setRefreshing
+            and (HomeRequest.isCurrent(self, generation) or self.shelf_view == old_view) then
+            old_view:setRefreshing(false)
+        end
+        if self.busy_message == busy_message then self:closeBusy() end
     end
     self:showBusy(_("Loading bookshelf..."))
+    busy_message = self.busy_message
     local started = self:runOnlineTask(_("Bookshelf"), function()
+        if not HomeRequest.isCurrent(self, generation) then done() return end
         local ok, result = pcall(function()
             return self.client:get_shelf()
         end)
         done()
+        if not HomeRequest.isCurrent(self, generation) then return end
         if not ok then
             logger.err("load bookshelf failed:", log_error(result))
             self:showInfo(T(
@@ -187,11 +215,10 @@ function M:refreshBookshelf(old_view, view_options)
         if old_group_key ~= self.shelf_group_key then
             next_options.page, next_options.scroll_offset = 1, nil
         end
-        if old_view then UIManager:close(old_view) end
         self:showShelfView(
             view_options and view_options.mode or self.shelf_view_mode or "books",
             view_options and view_options.keyword or nil,
-            nil,
+            old_view,
             next_options
         )
     end)
@@ -292,6 +319,7 @@ function M:fetchVisibleShelfCovers(view, items, options)
             }
             next_options.page = view.page
             next_options.skip_cover_fetch_once = true
+            next_options.preserve_home_request = true
             self:showShelfView(options.mode or "books", options.keyword, view, next_options)
         end
         local pending = self.shelf_cover_pending
@@ -365,6 +393,10 @@ end
 function M:showShelfView(mode, keyword, old_view, options)
     local LibraryView = require("weread.ui.library_view")
     options = options or {}
+    local preserve_home_request = options.preserve_home_request == true
+        and old_view ~= nil and old_view == self.home_view
+    options.preserve_home_request = nil
+    if not preserve_home_request then HomeRequest.begin(self) end
     mode = mode or "books"
     options.mode = mode
     options.keyword = keyword
@@ -400,7 +432,8 @@ function M:showShelfView(mode, keyword, old_view, options)
     local paged = cover_mode or shelf_settings.paginated ~= false
     local page = paged and (options.page or self.shelf_view_pages[mode] or 1) or 1
     local source = mode == "public_account" and accounts or books
-    local layout = LibraryView.getLayout(cover_mode, #source, mode)
+    local show_home_nav = options.wp_enable ~= false
+    local layout = LibraryView.getLayout(cover_mode, #source, mode, show_home_nav)
     local cover_layout = cover_mode and layout or nil
     local page_size = layout.page_size
     local cover_paths, cover_loading
@@ -419,7 +452,6 @@ function M:showShelfView(mode, keyword, old_view, options)
             end
         end
     end
-    if old_view then UIManager:close(old_view) end
     local view
     view = LibraryView.show({
         mode = mode,
@@ -444,7 +476,15 @@ function M:showShelfView(mode, keyword, old_view, options)
         cover_cell_height = cover_layout and cover_layout.cell_height,
         cover_paths = cover_paths,
         cover_loading = cover_loading,
+        show_home_nav = show_home_nav,
+        home_nav_active = "shelf",
     }, {
+        on_closed = function(closed_view)
+            self:forgetWeReadHomeView(closed_view)
+        end,
+        on_home_nav = function(route, current_view)
+            self:showWeReadHomePage(route, current_view)
+        end,
         on_switch = function(new_mode)
             local next_options = {}
             for key, value in pairs(options) do next_options[key] = value end
@@ -517,6 +557,8 @@ function M:showShelfView(mode, keyword, old_view, options)
     })
     if paged then self.shelf_view_pages[mode] = view.page end
     self.shelf_view = view
+    if show_home_nav then self.home_view = view end
+    if old_view then self:closeWeReadHomeView(old_view) end
     if cover_mode and not skip_cover_fetch_once then
         local fetch_options = {}
         for key, value in pairs(options) do fetch_options[key] = value end
@@ -524,6 +566,56 @@ function M:showShelfView(mode, keyword, old_view, options)
         fetch_options.prepared_accounts = accounts
         self:fetchVisibleShelfCovers(view, source, fetch_options)
     end
+end
+
+function M:showWeReadHomePage(page, old_view)
+    if page == "shelf" then
+        return self:showBookshelf(old_view)
+    elseif page == "stats" then
+        return self:showReadStats(old_view)
+    elseif page == "me" then
+        return self:showMyPage(old_view)
+    end
+end
+
+function M:showMyPage(old_view)
+    HomeRequest.begin(self)
+    local MyView = require("weread.ui.my_view")
+    old_view = old_view or self.home_view
+    local account = self.settings:get("account", {})
+    local account_status
+    if account.login_method == "qr" and tonumber(account.login_time or 0) > 0 then
+        account_status = _("Logged in")
+    elseif self.settings:is_cookie_configured() or self.settings:is_api_configured() then
+        account_status = _("Account configured")
+    else
+        account_status = _("Not logged in")
+    end
+    local account_name = type(account.name) == "string" and account.name or ""
+    if account_name == "" then
+        account_name = (self.settings:is_cookie_configured() or self.settings:is_api_configured())
+            and _("Unknown account") or _("Not logged in")
+    end
+    local view
+    view = MyView.show({
+        account = account,
+        account_name = account_name,
+        account_status = account_status,
+    }, {
+        on_closed = function(closed_view)
+            self:forgetWeReadHomeView(closed_view)
+        end,
+        on_home_nav = function(route, current_view)
+            self:showWeReadHomePage(route, current_view)
+        end,
+        on_exit = function(current_view)
+            self:closeWeReadHomeView(current_view)
+        end,
+    })
+    self.my_view = view
+    self.home_view = view
+    if old_view then self:closeWeReadHomeView(old_view) end
+    return view
 end
 
 function M:showShelfSearchDialog(view, mode, keyword, options)

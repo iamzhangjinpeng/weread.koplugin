@@ -25,6 +25,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
 local Screen = Device.screen
 local FocusNav = require("weread.ui.focus_nav")
+local HomeNav = require("weread.ui.home_nav")
 local I18n = require("weread.lib.i18n")
 local CoverLayout = require("weread.lib.cover_layout")
 local T = require("ffi/util").template
@@ -689,6 +690,10 @@ local LibraryView = FocusManager:extend{
     cover_paths = nil,
     cover_loading = nil,
     on_page_changed = nil,
+    home_nav_active = "shelf",
+    on_home_nav = nil,
+    on_closed = nil,
+    show_home_nav = true,
 }
 
 -- Defer destructive callbacks until Button has finished repainting its feedback.
@@ -719,8 +724,10 @@ function LibraryView:headerBar()
         end
         return widget
     end
-    local back = button(nil, "chevron.left", size, function() self:onClose() end)
-    local location_width = self.screen_w - 4 * size
+    -- The report target picker has no home navigation, so it keeps its back button.
+    local back = not self.show_home_nav
+        and button(nil, "chevron.left", size, function() self:onClose() end) or nil
+    local location_width = self.screen_w - (back and 4 or 3) * size
     local location = button(title .. " ▾", nil, nil,
         function() self:showSourceMenu() end, "left", nil, location_width)
     local search = button(nil, "appbar.search", size,
@@ -728,12 +735,23 @@ function LibraryView:headerBar()
     self.refresh_button = button(nil, "appbar.search", size,
         function() if self.on_refresh then self.on_refresh() end end, nil, "shelf-refresh.svg")
     local menu = button(nil, "appbar.menu", size, function() self:showOptions() end, nil, "shelf-menu.svg")
-    self._header_buttons = { back, location, search, self.refresh_button, menu }
+    self._header_buttons = {}
+    local header_row = HorizontalGroup:new{}
+    if back then
+        table.insert(self._header_buttons, back)
+        table.insert(header_row, back)
+    end
+    for _, item in ipairs({ location, search, self.refresh_button, menu }) do
+        table.insert(self._header_buttons, item)
+    end
+    table.insert(header_row, location)
+    table.insert(header_row, HorizontalSpan:new{ width = math.max(0, location_width - location:getSize().w) })
+    table.insert(header_row, search)
+    table.insert(header_row, self.refresh_button)
+    table.insert(header_row, menu)
     return VerticalGroup:new{
         align = "left",
-        HorizontalGroup:new{ back, location,
-            HorizontalSpan:new{ width = math.max(0, location_width - location:getSize().w) },
-            search, self.refresh_button, menu },
+        header_row,
         LineWidget:new{ dimen = Geom:new{ w = self.screen_w, h = Size.border.thin } },
     }
 end
@@ -1056,8 +1074,16 @@ function LibraryView:init()
     local header = self:headerBar()
     self:preparePagination()
     local page_bar = self:pageBar()
+    local home_nav, nav_buttons
+    if self.show_home_nav then
+        home_nav, nav_buttons = HomeNav.create(self.home_nav_active, self, function(route)
+            if self.on_home_nav then self.on_home_nav(route, self) end
+        end)
+    end
+    nav_buttons = nav_buttons or {}
+    local home_nav_height = home_nav and home_nav:getSize().h or 0
     local scroll_h = math.max(1, self.screen_h - header:getSize().h
-        - (page_bar and page_bar:getSize().h or 0))
+        - (page_bar and page_bar:getSize().h or 0) - home_nav_height)
     if self.cover_mode then
         local rows = math.max(1, math.floor(tonumber(self.cover_rows) or 2))
         self.cover_content_height = scroll_h
@@ -1081,6 +1107,10 @@ function LibraryView:init()
         rows[#rows + 1] = self._page_buttons
         for _i, button in ipairs(self._page_buttons) do outside_scroll[button] = true end
     end
+    if #nav_buttons > 0 then
+        rows[#rows + 1] = nav_buttons
+        for _i, button in ipairs(nav_buttons) do outside_scroll[button] = true end
+    end
     FocusNav.apply(self, rows, { scroll = scroll, outside_scroll = outside_scroll })
     FocusNav.initialFocus(self, 1, #self._focus_item_rows > 0 and 2 or 1)
     self[1] = FrameContainer:new{
@@ -1090,6 +1120,7 @@ function LibraryView:init()
         VerticalGroup:new{
             align = "left", header, scroll,
             page_bar or VerticalSpan:new{ width = 0 },
+            home_nav or VerticalSpan:new{ width = 0 },
         },
     }
     if self.paged then
@@ -1130,6 +1161,7 @@ function LibraryView:onShow()
 end
 
 function LibraryView:onCloseWidget()
+    if self.on_closed then self.on_closed(self) end
     UIManager:setDirty(nil, function() return "ui", self.dimen end)
 end
 
@@ -1141,10 +1173,11 @@ end
 local M = {}
 
 -- Measure before fetching covers, so the worker and the visible grid agree.
-function M.getLayout(cover_mode, count, mode)
+function M.getLayout(cover_mode, count, mode, show_home_nav)
     local width, height = Screen:getWidth(), Screen:getHeight()
     local header_height = Screen:scaleBySize(HEADER_SIZE) + Size.border.thin
     local page_bar_height = Screen:scaleBySize(54)
+    local home_nav_height = show_home_nav == false and 0 or HomeNav.getHeight()
     local function layout(reserved)
         if cover_mode then
             return CoverLayout.calculate{
@@ -1158,8 +1191,10 @@ function M.getLayout(cover_mode, count, mode)
         if row.free then row:free() end
         return { page_size = math.max(1, math.floor((height - reserved) / row_height)) }
     end
-    local result = layout(header_height)
-    if count > result.page_size then result = layout(header_height + page_bar_height) end
+    local result = layout(header_height + home_nav_height)
+    if count > result.page_size then
+        result = layout(header_height + home_nav_height + page_bar_height)
+    end
     return result
 end
 
@@ -1197,6 +1232,10 @@ function M.show(data, callbacks)
         on_filter = callbacks.on_filter,
         on_select = callbacks.on_select,
         on_page_changed = callbacks.on_page_changed,
+        home_nav_active = data.home_nav_active or "shelf",
+        on_home_nav = callbacks.on_home_nav,
+        on_closed = callbacks.on_closed,
+        show_home_nav = data.show_home_nav ~= false,
     }
     UIManager:show(view)
     return view

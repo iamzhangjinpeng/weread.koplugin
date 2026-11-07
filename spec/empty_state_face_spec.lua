@@ -457,13 +457,18 @@ end)
 expect(ok, "empty review list failed to build: " .. tostring(error_message))
 expect(#shown == 14, "all bookshelf and empty-state views should be shown")
 
-expect(#paged_view._header_buttons == 5 and paged_view._tab_buttons == nil
+expect(#paged_view._header_buttons == 4 and paged_view._tab_buttons == nil
         and paged_view._action_primary == nil, "shelf retained its permanent tabs or toolbars")
 local width = 0
 for _, button in ipairs(paged_view._header_buttons) do width = width + button:getSize().w end
 expect(width <= 600, "compact header controls escaped the screen width")
-expect(paged_view._header_buttons[2].width == nil and paged_view._header_buttons[2].max_width == 312,
+expect(paged_view._header_buttons[1].width == nil and paged_view._header_buttons[1].max_width == 384,
     "source button must size its feedback to the label, with a screen-width cap")
+local picker_view = LibraryView.show({
+    mode = "books", books = books, accounts = {}, show_home_nav = false,
+}, {})
+expect(#picker_view._header_buttons == 5 and picker_view._header_buttons[1].icon == "chevron.left",
+    "the bookshelf picker must retain its back button without home navigation")
 changed_page = nil
 expect(paged_view:onShelfSwipe(nil, { direction = "west" }) and changed_page == 3,
     "left swipe did not use the same next page as the button")
@@ -498,11 +503,11 @@ local selector_view = LibraryView.show({
     on_switch = function(mode) changed_type = mode end,
     on_display_change = function(key, value) display_key, display_value = key, value end,
 })
-selector_view._header_buttons[2].callback()
+selector_view._header_buttons[1].callback()
 local selector = shown[#shown]
 expect(selector.items_per_page == 2 and #selector.item_table == 2 and selector.height < 400,
     "group chooser did not reuse a paginated native menu")
-expect(selector.custom_title_bar[1].height == selector_view._header_buttons[2].height,
+expect(selector.custom_title_bar[1].height == selector_view._header_buttons[1].height,
     "content switcher is shorter than the bookshelf header")
 expect(selector.page_info.handleEvent and not selector.page_info:handleEvent({})
         and selector.item_dimen.h * selector.items_per_page == selector.available_height,
