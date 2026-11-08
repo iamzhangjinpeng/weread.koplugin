@@ -287,7 +287,7 @@ function M:bookMatchesFilters(book, saved_books, downloaded_cache)
     return true
 end
 
-function M:showShelfSortOptions(on_sorted)
+function M:showShelfSortOptions(on_sorted, shelf_view)
     local dialog
     local current_sort = self.settings:get("shelf").sort_order or "default"
     local buttons = {}
@@ -302,6 +302,8 @@ function M:showShelfSortOptions(on_sorted)
                 -- against the still-shown dialog (avoids a ghost label on close).
                 callback = function()
                     UIManager:nextTick(function()
+                        if shelf_view and shelf_view.showShelfPopup
+                            and (shelf_view._shelf_closed or shelf_view._shelf_popup ~= dialog) then return end
                         UIManager:close(dialog)
                         local shelf = self.settings:get("shelf")
                         shelf.sort_order = opt.key
@@ -318,10 +320,14 @@ function M:showShelfSortOptions(on_sorted)
         title_align = "center",
         buttons = buttons,
     }
-    UIManager:show(dialog)
+    if shelf_view and shelf_view.showShelfPopup then
+        shelf_view:showShelfPopup(dialog)
+    else
+        UIManager:show(dialog)
+    end
 end
 
-function M:showShelfFilterOptions(on_changed)
+function M:showShelfFilterOptions(on_changed, shelf_view)
     local dialog
     local filters = self.shelf_filters
     local buttons = {
@@ -333,6 +339,8 @@ function M:showShelfFilterOptions(on_changed)
                 end,
                 callback = function()
                     UIManager:nextTick(function()
+                        if shelf_view and shelf_view.showShelfPopup
+                            and (shelf_view._shelf_closed or shelf_view._shelf_popup ~= dialog) then return end
                         UIManager:close(dialog)
                         filters.reading = nil
                         filters.download = nil
@@ -352,6 +360,8 @@ function M:showShelfFilterOptions(on_changed)
                 end,
                 callback = function()
                     UIManager:nextTick(function()
+                        if shelf_view and shelf_view.showShelfPopup
+                            and (shelf_view._shelf_closed or shelf_view._shelf_popup ~= dialog) then return end
                         UIManager:close(dialog)
                         -- Toggle within the dimension: re-tapping clears it, else select.
                         filters[opt.dim] = (filters[opt.dim] == opt.value) and nil or opt.value
@@ -367,7 +377,11 @@ function M:showShelfFilterOptions(on_changed)
         title_align = "center",
         buttons = buttons,
     }
-    UIManager:show(dialog)
+    if shelf_view and shelf_view.showShelfPopup then
+        shelf_view:showShelfPopup(dialog)
+    else
+        UIManager:show(dialog)
+    end
 end
 
 function M:bookRecordHasDownload(record)

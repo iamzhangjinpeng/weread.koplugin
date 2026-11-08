@@ -320,7 +320,12 @@ function M:fetchVisibleShelfCovers(view, items, options)
             next_options.page = view.page
             next_options.skip_cover_fetch_once = true
             next_options.preserve_home_request = true
-            self:showShelfView(options.mode or "books", options.keyword, view, next_options)
+            local function redraw()
+                if generation ~= self.shelf_cover_generation or self.shelf_view ~= view then return end
+                if view.deferCoverRedraw and view:deferCoverRedraw(redraw) then return end
+                self:showShelfView(options.mode or "books", options.keyword, view, next_options)
+            end
+            redraw()
         end
         local pending = self.shelf_cover_pending
         self.shelf_cover_pending = nil
@@ -393,8 +398,9 @@ end
 function M:showShelfView(mode, keyword, old_view, options)
     local LibraryView = require("weread.ui.library_view")
     options = options or {}
-    local preserve_home_request = options.preserve_home_request == true
-        and old_view ~= nil and old_view == self.home_view
+    local cover_redraw = options.preserve_home_request == true
+        and old_view ~= nil and old_view == self.shelf_view
+    local preserve_home_request = cover_redraw and old_view == self.home_view
     options.preserve_home_request = nil
     if not preserve_home_request then HomeRequest.begin(self) end
     mode = mode or "books"
@@ -527,7 +533,7 @@ function M:showShelfView(mode, keyword, old_view, options)
                 options.prepared_shelf = nil
                 options.page, options.scroll_offset = 1, nil
                 self:showShelfView(mode, keyword, view, options)
-            end)
+            end, view)
         end,
         on_filter = function()
             self:showShelfFilterOptions(function()
@@ -535,7 +541,7 @@ function M:showShelfView(mode, keyword, old_view, options)
                 options.prepared_shelf = nil
                 options.page, options.scroll_offset = 1, nil
                 self:showShelfView(mode, keyword, view, options)
-            end)
+            end, view)
         end,
         on_select = function(book, selected_mode)
             if options.on_select then
@@ -558,6 +564,7 @@ function M:showShelfView(mode, keyword, old_view, options)
     if paged then self.shelf_view_pages[mode] = view.page end
     self.shelf_view = view
     if show_home_nav then self.home_view = view end
+    if cover_redraw then old_view._cover_redraw_successor = view end
     if old_view then self:closeWeReadHomeView(old_view) end
     if cover_mode and not skip_cover_fetch_once then
         local fetch_options = {}
@@ -569,6 +576,12 @@ function M:showShelfView(mode, keyword, old_view, options)
 end
 
 function M:showWeReadHomePage(page, old_view)
+    if old_view and old_view ~= self.home_view then
+        while old_view._cover_redraw_successor do
+            old_view = old_view._cover_redraw_successor
+        end
+        if old_view ~= self.home_view then return end
+    end
     if page == "shelf" then
         return self:showBookshelf(old_view)
     elseif page == "stats" then
@@ -651,6 +664,7 @@ function M:showShelfSearchDialog(view, mode, keyword, options)
             },
         }},
     }
+    if view.trackShelfPopup then view:trackShelfPopup(dialog) end
     self:showInputDialog(dialog)
 end
 

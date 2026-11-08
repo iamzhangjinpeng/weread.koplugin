@@ -188,6 +188,47 @@ stats_fetch_hook = nil
 expect(cover_failure.home_view == available_shelf,
     "failed statistics load did not leave the refreshed shelf available")
 
+-- A queued bottom navigation must follow a cover-only shelf replacement.
+local function makeShelfHost()
+    local probe = newHost()
+    probe.showShelfView = nil
+    probe.settings.get = function(_, key, default)
+        if key == "account" then return probe.account end
+        if key == "books" then return {} end
+        if key == "shelf" then return { sort_order = "default", view_mode = "list", paginated = true } end
+        return default
+    end
+    probe.shelf_regular, probe.shelf_mp = {}, {}
+    probe.shelfSortSummary = function() return "" end
+    probe.shelfFilterSummary = function() return "" end
+    probe:showShelfView("books", nil, nil, { skip_cover_fetch_once = true })
+    return probe
+end
+
+events = {}
+local queued = makeShelfHost()
+local queued_source = queued.home_view
+queued:showShelfView("books", nil, queued_source, {
+    skip_cover_fetch_once = true, preserve_home_request = true,
+})
+local queued_replacement = queued.home_view
+events = {}
+queued_source.callbacks.on_home_nav("me", queued_source)
+expect(queued.home_view.name == "my" and events[1] == "show:my"
+    and events[2] == "close:redrawn shelf" and queued.shelf_view == nil,
+    "queued navigation did not replace the cover-redrawn shelf")
+
+-- An obsolete callback must not close or replace a later, unrelated page.
+events = {}
+local stale = makeShelfHost()
+local stale_source = stale.home_view
+stale:showMyPage(stale_source)
+local retained = stale.home_view
+events = {}
+stale_source.callbacks.on_home_nav("stats", stale_source)
+expect(stale.home_view == retained and stale.pending == nil and #events == 0,
+    "an obsolete navigation callback replaced a newer page")
+
 -- Closing a source page cancels its pending shelf refresh without touching it.
 local refresh = newHost()
 local refresh_calls = 0

@@ -1,6 +1,6 @@
 # WeRead KOReader Plugin
 
-这是 [finlater/weread.koplugin](https://github.com/finlater/weread.koplugin) 的个人 fork。当前界面改造位于 [`feature/weread-home`](https://github.com/iamzhangjinpeng/weread.koplugin/tree/feature/weread-home) 分支；本版基于原项目 1.7.0，标记为 **1.6.99**，便于需要时通过插件内的在线更新恢复原版。
+这是 [finlater/weread.koplugin](https://github.com/finlater/weread.koplugin) 的个人 fork。当前界面改造位于 [`feature/weread-home`](https://github.com/iamzhangjinpeng/weread.koplugin/tree/feature/weread-home) 分支；本版基于原项目 1.7.0，标记为 **1.6.100**，便于需要时通过插件内的在线更新恢复原版。
 
 ## 本分支的界面
 
@@ -62,7 +62,7 @@ WeReader 闭源版不包含微信读书会员或付费书籍；可阅读内容�
 
 > ⚠️ 建议使用 **KOReader 2026.03 或更高版本**。旧版本可能无法正常加载或使用插件，例如「工具」菜单中找不到「微信读书」。详见 [#14](https://github.com/finlater/weread.koplugin/issues/14)。
 
-1. 前往 [本 fork 的发行页面](https://github.com/iamzhangjinpeng/weread.koplugin/releases/tag/v1.6.99) 下载 `weread.koplugin-v1.6.99.zip` 安装包。
+1. 前往 [本 fork 的发行页面](https://github.com/iamzhangjinpeng/weread.koplugin/releases/tag/v1.6.100) 下载 `weread.koplugin-v1.6.100.zip` 安装包。
 2. 解压安装包，得到 `weread.koplugin` 文件夹。
 3. 将该文件夹复制到 KOReader 的 `plugins` 目录：
 

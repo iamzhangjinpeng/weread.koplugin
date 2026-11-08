@@ -182,8 +182,10 @@ expect(#shown[5].data.books == 1 and shown[5].data.books[1].title == "Zulu",
 
 host.shelf_view_pages.books = 7
 host.bookMatchesFilters = function() return false end
-host.showShelfFilterOptions = function(_self, callback) callback() end
+local filter_owner, filter_source = nil, host.shelf_view
+host.showShelfFilterOptions = function(_self, callback, owner) filter_owner = owner callback() end
 shown[5].callbacks.on_filter()
+expect(filter_owner == filter_source, "filter popup did not retain its shelf owner")
 expect(#shown[6].data.books == 0 and shown[6].data.paged == true,
     "bookshelf filter did not preserve an empty paged result")
 expect(shown[6].data.page == 1 and host.shelf_view_pages.books == 1,
@@ -234,6 +236,36 @@ expect(#shown == 10 and shown[10].data.cover_paths[shelf[1]] ~= nil,
     "cover batch did not refresh the page once with cached paths")
 expect(shown[10].data.cover_loading[shelf[1]] ~= true,
     "cached cover incorrectly remained in its loading state")
+
+-- A completed cover batch must wait for the shelf menu, and must not redraw
+-- after the user has moved away from that shelf.
+local old_show_shelf = host.showShelfView
+local redraws, deferred = 0, nil
+host.showShelfView = function() redraws = redraws + 1 end
+local menu_view = { page = 1, page_size = 1 }
+menu_view.deferCoverRedraw = function(_, callback) deferred = callback return true end
+host.shelf_view = menu_view
+host.shelf_cover_generation = host.shelf_cover_generation + 1
+host:fetchVisibleShelfCovers(menu_view, {
+    { bookId = "menu-wait", cover = "https://cdn.example/menu-wait" },
+}, {})
+expect(deferred ~= nil and redraws == 0, "cover redraw did not wait for the open menu")
+menu_view.deferCoverRedraw = function() return false end
+deferred()
+expect(redraws == 1, "cover redraw did not resume after the menu closed")
+
+deferred, redraws = nil, 0
+menu_view.deferCoverRedraw = function(_, callback) deferred = callback return true end
+host.shelf_cover_generation = host.shelf_cover_generation + 1
+host:fetchVisibleShelfCovers(menu_view, {
+    { bookId = "menu-leave", cover = "https://cdn.example/menu-leave" },
+}, {})
+expect(deferred ~= nil, "second cover batch did not defer")
+host.shelf_view = { page = 1 }
+menu_view.deferCoverRedraw = function() return false end
+deferred()
+expect(redraws == 0, "deferred cover redraw reopened a shelf after navigation")
+host.showShelfView = old_show_shelf
 
 local requests_before_unsafe_url = #cover_requests
 local unsafe_view = { page = 1 }

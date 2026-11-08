@@ -713,7 +713,9 @@ function LibraryView:headerBar()
             padding_h = max_width and Screen:scaleBySize(6) or 0,
             text_font_size = 24, align = align or "center",
             avoid_text_truncation = false, show_parent = self,
-            callback = after_tap(callback),
+            callback = after_tap(function()
+                if not self._shelf_closed and not self._shelf_popup then callback() end
+            end),
         }
         if icon_file then
             widget.label_widget:free()
@@ -765,6 +767,31 @@ function LibraryView:getScrollOffset()
     return self.scroll and self.scroll:getScrolledOffset()
 end
 
+-- Keep cover refreshes from replacing the shelf underneath its open menu.
+function LibraryView:deferCoverRedraw(callback)
+    if not self._shelf_popup then return false end
+    self._deferred_cover_redraw = callback
+    return true
+end
+
+function LibraryView:trackShelfPopup(dialog)
+    local original_close = dialog.onCloseWidget
+    self._shelf_popup = dialog
+    dialog.onCloseWidget = function(popup, ...)
+        if original_close then original_close(popup, ...) end
+        if self._shelf_popup ~= popup then return end
+        self._shelf_popup = nil
+        local redraw = self._deferred_cover_redraw
+        self._deferred_cover_redraw = nil
+        if redraw then UIManager:nextTick(redraw) end
+    end
+end
+
+function LibraryView:showShelfPopup(dialog)
+    self:trackShelfPopup(dialog)
+    UIManager:show(dialog)
+end
+
 function LibraryView:showSourceMenu(menu_mode)
     local Menu = require("ui/widget/menu")
     menu_mode = menu_mode or self.mode
@@ -772,6 +799,7 @@ function LibraryView:showSourceMenu(menu_mode)
     local dialog
     local function select(callback)
         return after_tap(function()
+            if self._shelf_closed or self._shelf_popup ~= dialog then return end
             UIManager:close(dialog)
             callback()
         end)
@@ -858,14 +886,18 @@ function LibraryView:showSourceMenu(menu_mode)
     end
     -- Keep popout dismissal, but use square corners like the bookshelf.
     dialog[1].radius = 0
-    UIManager:show(dialog)
+    self:showShelfPopup(dialog)
 end
 
 function LibraryView:showOptions()
     local ButtonDialog = require("ui/widget/buttondialog")
     local dialog
     local function action(callback)
-        return after_tap(function() UIManager:close(dialog) callback() end)
+        return after_tap(function()
+            if self._shelf_closed or self._shelf_popup ~= dialog then return end
+            UIManager:close(dialog)
+            callback()
+        end)
     end
     local buttons = {{ {
         text = T(_("Sort: %1"), self.sort_label or ""),
@@ -897,7 +929,7 @@ function LibraryView:showOptions()
     end
     dialog = ButtonDialog:new{ title = _("Bookshelf"), buttons = buttons }
     dialog.movable[1].radius = 0
-    UIManager:show(dialog)
+    self:showShelfPopup(dialog)
 end
 
 function LibraryView:itemStatus(book)
@@ -1034,7 +1066,7 @@ function LibraryView:pageBar()
         text_font_size = 22, text_font_bold = true, radius = 0, margin = 0, padding = 0,
         bordersize = 0, enabled = self.page > 1, show_parent = self,
         callback = after_tap(function()
-            if self.page > 1 and self.on_page_changed then
+            if not self._shelf_closed and self.page > 1 and self.on_page_changed then
                 self.on_page_changed(self.page - 1)
             end
         end),
@@ -1051,7 +1083,7 @@ function LibraryView:pageBar()
         radius = 0, margin = 0, bordersize = 0, padding = 0,
         enabled = self.page < self.page_count, show_parent = self,
         callback = after_tap(function()
-            if self.page < self.page_count and self.on_page_changed then
+            if not self._shelf_closed and self.page < self.page_count and self.on_page_changed then
                 self.on_page_changed(self.page + 1)
             end
         end),
@@ -1161,7 +1193,9 @@ function LibraryView:onShow()
 end
 
 function LibraryView:onCloseWidget()
+    self._shelf_closed = true
     if self.on_closed then self.on_closed(self) end
+    if self._shelf_popup then UIManager:close(self._shelf_popup) end
     UIManager:setDirty(nil, function() return "ui", self.dimen end)
 end
 

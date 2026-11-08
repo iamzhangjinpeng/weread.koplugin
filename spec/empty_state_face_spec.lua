@@ -527,6 +527,160 @@ options_dialog.buttons[3][2].callback()
 expect(display_key == "view_mode" and display_value == "cover", "cover option is missing from the shelf menu")
 options_dialog.buttons[4][2].callback()
 expect(display_key == "paginated" and display_value == false, "continuous-list option is missing")
+
+-- A queued header tap must not open a popup after its shelf has closed.
+local late_ui = require("ui/uimanager")
+local previous_next_tick = late_ui.nextTick
+local late_ticks = {}
+late_ui.nextTick = function(_, callback) late_ticks[#late_ticks + 1] = callback end
+local late_shelf = LibraryView.show({
+    mode = "books", books = books, accounts = {}, paged = true,
+}, {})
+late_shelf._header_buttons[#late_shelf._header_buttons].callback()
+expect(#late_ticks == 1, "header tap was not deferred")
+late_shelf:onCloseWidget()
+local shown_before_late_tap = #shown
+late_ticks[1]()
+expect(#shown == shown_before_late_tap and late_shelf._shelf_popup == nil,
+    "queued header tap opened a menu after its shelf closed")
+
+late_ticks = {}
+local live_shelf = LibraryView.show({
+    mode = "books", books = books, accounts = {}, paged = true,
+}, {})
+live_shelf._header_buttons[#live_shelf._header_buttons].callback()
+local shown_before_live_tap = #shown
+late_ticks[1]()
+expect(#shown == shown_before_live_tap + 1 and live_shelf._shelf_popup == shown[#shown],
+    "header tap stopped opening the menu for an active shelf")
+
+-- Two header taps already queued in the same input batch must not leave
+-- multiple dialogs in the window stack.
+late_ticks = {}
+local search_calls = 0
+local duplicate_shelf = LibraryView.show({
+    mode = "books", books = books, accounts = {}, paged = true,
+}, { on_search = function() search_calls = search_calls + 1 end })
+local header = duplicate_shelf._header_buttons
+local shown_before_duplicate = #shown
+header[#header].callback()
+header[#header].callback()
+header[2].callback()
+expect(#late_ticks == 3, "header actions were not queued")
+late_ticks[1]()
+local only_popup = shown[#shown]
+late_ticks[2]()
+late_ticks[3]()
+expect(#shown == shown_before_duplicate + 1 and duplicate_shelf._shelf_popup == only_popup
+    and search_calls == 0, "queued header taps created overlapping dialogs")
+only_popup:onCloseWidget()
+late_ticks = {}
+header[2].callback()
+late_ticks[1]()
+expect(search_calls == 1, "header action stayed blocked after popup closed")
+
+late_ticks = {}
+local late_page, page_calls = nil, 0
+late_page = LibraryView.show({
+    mode = "books", books = books, accounts = {}, paged = true, page = 1, page_size = 3,
+}, { on_page_changed = function() page_calls = page_calls + 1 end })
+late_page._page_buttons[3].callback()
+late_page:onCloseWidget()
+late_ticks[1]()
+expect(page_calls == 0, "queued page change ran after its shelf closed")
+
+late_ticks = {}
+local popup_actions = 0
+local popup_shelf = LibraryView.show({ mode = "books", books = books, accounts = {}, paged = true }, {
+    on_display_change = function() popup_actions = popup_actions + 1 end,
+})
+popup_shelf:showOptions()
+local late_popup = shown[#shown]
+local previous_close = late_ui.close
+late_ui.close = function(_, widget)
+    if widget.onCloseWidget then widget:onCloseWidget() end
+end
+late_popup.buttons[3][2].callback()
+popup_shelf:onCloseWidget()
+late_ticks[1]()
+expect(popup_actions == 0, "queued menu action ran after its shelf closed")
+
+late_ticks = {}
+local dismissed_shelf = LibraryView.show({ mode = "books", books = books, accounts = {}, paged = true }, {
+    on_display_change = function() popup_actions = popup_actions + 1 end,
+})
+dismissed_shelf:showOptions()
+local dismissed_popup = shown[#shown]
+dismissed_popup.buttons[3][2].callback()
+late_ui:close(dismissed_popup)
+late_ticks[1]()
+expect(popup_actions == 0, "queued action ran after its menu was dismissed")
+
+late_ticks = {}
+local source_actions = 0
+local source_shelf = LibraryView.show({ mode = "books", books = books, accounts = {}, paged = true }, {
+    on_select_group = function() source_actions = source_actions + 1 end,
+})
+source_shelf:showSourceMenu()
+local source_popup = shown[#shown]
+source_popup.item_table[1].callback()
+source_shelf:onCloseWidget()
+late_ticks[1]()
+expect(source_actions == 0, "queued group action ran after its shelf closed")
+late_ui.close = previous_close
+late_ui.nextTick = previous_next_tick
+
+-- Cover redraws wait until the active shelf menu is closed.
+local ui = require("ui/uimanager")
+local original_next_tick = ui.nextTick
+local pending_ticks, redraw_count = {}, 0
+ui.nextTick = function(_, callback) pending_ticks[#pending_ticks + 1] = callback end
+selector_view:showOptions()
+local cover_dialog = shown[#shown]
+expect(selector_view:deferCoverRedraw(function() redraw_count = redraw_count + 1 end),
+    "cover redraw was not deferred while the options menu was open")
+expect(redraw_count == 0, "cover redraw ran beneath an open options menu")
+cover_dialog:onCloseWidget()
+expect(redraw_count == 0 and #pending_ticks == 1, "closing menu did not schedule cover redraw")
+pending_ticks[1]()
+expect(redraw_count == 1, "deferred cover redraw did not run after menu close")
+expect(not selector_view:deferCoverRedraw(function() end),
+    "closed menu continued to block cover redraws")
+
+-- A sort/filter submenu can open before the deferred tick runs.
+pending_ticks, redraw_count = {}, 0
+local function redraw_after_menus()
+    if selector_view:deferCoverRedraw(redraw_after_menus) then return end
+    redraw_count = redraw_count + 1
+end
+selector_view:showOptions()
+local first_menu = shown[#shown]
+redraw_after_menus()
+first_menu:onCloseWidget()
+selector_view:showOptions()
+local second_menu = shown[#shown]
+local first_tick = table.remove(pending_ticks, 1)
+first_tick()
+expect(redraw_count == 0, "cover redraw ran under a newly opened submenu")
+second_menu:onCloseWidget()
+local second_tick = table.remove(pending_ticks, 1)
+expect(second_tick ~= nil, "submenu close did not reschedule cover redraw")
+second_tick()
+expect(redraw_count == 1, "cover redraw did not resume after all menus closed")
+
+selector_view:showOptions()
+local owned_popup = shown[#shown]
+local original_close, closed_popup = ui.close, nil
+ui.close = function(_, widget)
+    closed_popup = widget
+    if widget.onCloseWidget then widget:onCloseWidget() end
+end
+selector_view:onCloseWidget()
+expect(closed_popup == owned_popup and selector_view._shelf_popup == nil,
+    "closing shelf left its menu open")
+ui.close = original_close
+ui.nextTick = original_next_tick
+
 selector_view.groups = {}
 for i = 1, 11 do selector_view.groups[i] = { key = tostring(i), label = tostring(i), books = {} } end
 selector_view:showSourceMenu()
