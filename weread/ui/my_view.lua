@@ -35,6 +35,9 @@ local CARD_BORDER = Size.border.default
 local CARD_GAP = Screen:scaleBySize(10)
 local ROW_GAP = Screen:scaleBySize(10)
 local LABEL_COLUMN_RATIO = 0.40
+-- Secondary text sits at 0x55: dark enough to stay crisp on a 300dpi e-ink
+-- panel, still clearly lighter than the figures it labels.
+local MUTED_TEXT = Blitbuffer.COLOR_GRAY_5
 
 -- Same wording as the statistics page, so totals never read differently
 -- on two screens.
@@ -84,7 +87,7 @@ function MyView:sectionHeader(text)
     return TextWidget:new{
         text = text,
         face = Font:getFace("cfont", 14),
-        fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+        fgcolor = MUTED_TEXT,
         max_width = self.card_inner_width,
     }
 end
@@ -98,7 +101,7 @@ function MyView:metricRow(label_text, value_text, key)
     local label = TextWidget:new{
         text = label_text,
         face = Font:getFace("cfont", 16),
-        fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+        fgcolor = MUTED_TEXT,
         max_width = label_width,
     }
     local gap = math.max(Size.padding.small, label_width - label:getSize().w)
@@ -168,7 +171,7 @@ function MyView:buildContent()
                 TextWidget:new{
                     text = self.account_status or _("WeRead account"),
                     face = Font:getFace("cfont", 14),
-                    fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+                    fgcolor = MUTED_TEXT,
                     max_width = account_text_width,
                 },
             },
