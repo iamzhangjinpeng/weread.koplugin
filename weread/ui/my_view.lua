@@ -2,6 +2,7 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Button = require("ui/widget/button")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local FocusManager = require("ui/widget/focusmanager")
 local FocusNav = require("weread.ui.focus_nav")
@@ -26,6 +27,13 @@ local T = require("ffi/util").template
 local icons_dir = debug.getinfo(1, "S").source:match("^@(.*/)") .. "../../icons/"
 
 local PLACEHOLDER = "—"
+
+-- Cards share one padding and one page margin, so every edge lines up.
+local PAGE_MARGIN = Size.padding.large
+local CARD_PADDING = Size.padding.large
+local CARD_GAP = Screen:scaleBySize(10)
+local ROW_GAP = Screen:scaleBySize(10)
+local LABEL_COLUMN_RATIO = 0.40
 
 -- Same wording as the statistics page, so totals never read differently
 -- on two screens.
@@ -56,42 +64,48 @@ local MyView = FocusManager:extend{
     on_closed = nil,
 }
 
-function MyView:sectionHeader(text)
-    return TextWidget:new{
-        text = text,
-        face = Font:getFace("cfont", 17),
-        max_width = self.screen_w - 2 * Size.padding.large,
+-- A card is a white surface with a hairline border. The border, not a grey
+-- fill, is what separates it from the page: e-ink leaves ghosting when large
+-- areas stay grey, and the hairline stays crisp.
+function MyView:card(content)
+    return FrameContainer:new{
+        background = Blitbuffer.COLOR_WHITE,
+        color = Blitbuffer.COLOR_LIGHT_GRAY,
+        radius = Size.radius.window,
+        bordersize = Size.border.default,
+        padding = CARD_PADDING,
+        margin = 0,
+        content,
     }
 end
 
--- Label column width is fixed, so a value arriving later never shifts the
--- row: only the value widget itself is replaced.
-function MyView:metricRow(label_text, value_text, key, icon_file)
-    local row_width = self.screen_w - 2 * Size.padding.large
-    local icon_size = Screen:scaleBySize(22)
-    local icon_gap = Screen:scaleBySize(8)
-    local text_width = row_width - icon_size - icon_gap
-    local label_width = math.floor(text_width * 0.52)
-    local icon = IconWidget:new{
-        file = icons_dir .. icon_file,
-        width = icon_size,
-        height = icon_size,
+function MyView:sectionHeader(text)
+    return TextWidget:new{
+        text = text,
+        face = Font:getFace("cfont", 14),
+        fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+        max_width = self.card_inner_width,
     }
+end
+
+-- Label left, figure right. The label column is a fixed share of the card so
+-- every figure starts on the same vertical line, and the figure gets the rest
+-- of the row without being charged for the label column twice.
+function MyView:metricRow(label_text, value_text, key)
+    local inner_width = self.card_inner_width
+    local label_width = math.floor(inner_width * LABEL_COLUMN_RATIO)
     local label = TextWidget:new{
         text = label_text,
-        face = Font:getFace("cfont", 18),
+        face = Font:getFace("cfont", 16),
+        fgcolor = Blitbuffer.COLOR_DARK_GRAY,
         max_width = label_width,
     }
-    local label_size = label:getSize()
-    local gap = math.max(Size.padding.small, label_width - label_size.w)
-    -- The value gets whatever the label column did not consume. Measuring the
-    -- rendered label keeps the two columns aligned without charging the value
-    -- for the column width twice, which used to leave it a few characters wide.
-    local value_width = row_width - icon_size - icon_gap - label_size.w - gap
+    local gap = math.max(Size.padding.small, label_width - label:getSize().w)
     local value = TextWidget:new{
         text = value_text,
-        face = Font:getFace("cfont", 18),
-        max_width = math.max(1, value_width),
+        face = Font:getFace("cfont", 21),
+        bold = true,
+        max_width = math.max(1, inner_width - label_width),
     }
     if key then
         self._metric_values = self._metric_values or {}
@@ -99,8 +113,6 @@ function MyView:metricRow(label_text, value_text, key, icon_file)
     end
     return HorizontalGroup:new{
         align = "center",
-        icon,
-        HorizontalSpan:new{ width = icon_gap },
         label,
         HorizontalSpan:new{ width = gap },
         value,
@@ -114,10 +126,14 @@ function MyView:buildContent()
     local account_name = self.account_name or (type(account.name) == "string" and account.name or "")
     if account_name == "" then account_name = _("Not logged in") end
 
+    local inner_width = self.card_inner_width
+
     self.exit_button = Button:new{
         text = _("Back to KOReader"),
-        width = self.screen_w - 2 * Size.padding.large,
-        height = Screen:scaleBySize(58),
+        width = self.screen_w - 2 * PAGE_MARGIN,
+        height = Screen:scaleBySize(46),
+        bordersize = Size.border.default,
+        text_font_size = 17,
         show_parent = self,
         callback = function()
             UIManager:nextTick(function()
@@ -126,84 +142,90 @@ function MyView:buildContent()
         end,
     }
 
-    local avatar_size = Screen:scaleBySize(52)
-    local account_text_width = math.max(1, self.screen_w - 3 * Size.padding.large - avatar_size)
-    local name = TextWidget:new{
-        text = account_name,
-        face = Font:getFace("cfont", 24),
-        max_width = account_text_width,
-    }
-    local status = TextWidget:new{
-        text = self.account_status or _("WeRead account"),
-        face = Font:getFace("cfont", 17),
-        max_width = account_text_width,
-    }
-
-    local function padded(widget)
-        return HorizontalGroup:new{
+    local avatar_size = Screen:scaleBySize(44)
+    local account_text_width = inner_width - avatar_size - Size.padding.large
+    local account_card = self:card(VerticalGroup:new{
+        align = "left",
+        HorizontalSpan:new{ width = inner_width },
+        HorizontalGroup:new{
+            align = "center",
+            IconWidget:new{
+                file = icons_dir .. "account-avatar.svg",
+                width = avatar_size,
+                height = avatar_size,
+            },
             HorizontalSpan:new{ width = Size.padding.large },
-            widget,
-        }
-    end
+            VerticalGroup:new{
+                align = "left",
+                TextWidget:new{
+                    text = account_name,
+                    face = Font:getFace("cfont", 20),
+                    bold = true,
+                    max_width = account_text_width,
+                },
+                VerticalSpan:new{ width = Size.padding.small },
+                TextWidget:new{
+                    text = self.account_status or _("WeRead account"),
+                    face = Font:getFace("cfont", 14),
+                    fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+                    max_width = account_text_width,
+                },
+            },
+        },
+    })
 
     self._metric_values = {}
+    local stats_card = self:card(VerticalGroup:new{
+        align = "left",
+        HorizontalSpan:new{ width = inner_width },
+        self:sectionHeader(_("Reading overview")),
+        VerticalSpan:new{ width = ROW_GAP },
+        self:metricRow(_("Total reading time"),
+            format_duration(stats and stats.total_read_time), "total"),
+        VerticalSpan:new{ width = ROW_GAP },
+        self:metricRow(_("Reading days"),
+            stats and T(_("%1 days"), stats.read_days or 0) or PLACEHOLDER, "days"),
+        VerticalSpan:new{ width = ROW_GAP },
+        self:metricRow(_("Daily average"),
+            format_duration(stats and stats.day_average), "average"),
+    })
+
+    local shelf_card = self:card(VerticalGroup:new{
+        align = "left",
+        HorizontalSpan:new{ width = inner_width },
+        self:sectionHeader(_("Bookshelf")),
+        VerticalSpan:new{ width = ROW_GAP },
+        self:metricRow(_("On shelf"), book_count(shelf and shelf.total), "shelf_total"),
+        VerticalSpan:new{ width = ROW_GAP },
+        self:metricRow(_("Downloaded"), book_count(shelf and shelf.downloaded), "shelf_downloaded"),
+        VerticalSpan:new{ width = ROW_GAP },
+        self:metricRow(_("Finished"), book_count(shelf and shelf.finished), "shelf_finished"),
+    })
+
+    local function inset(widget)
+        return HorizontalGroup:new{
+            HorizontalSpan:new{ width = PAGE_MARGIN },
+            widget,
+            HorizontalSpan:new{ width = PAGE_MARGIN },
+        }
+    end
 
     local content = VerticalGroup:new{
         align = "left",
         HorizontalSpan:new{ width = self.screen_w },
-        VerticalSpan:new{ width = Size.padding.large },
-        padded(TextWidget:new{
+        VerticalSpan:new{ width = PAGE_MARGIN },
+        inset(TextWidget:new{
             text = _("My"),
             face = Font:getFace("tfont", 26),
-            max_width = self.screen_w - 2 * Size.padding.large,
+            max_width = self.screen_w - 2 * PAGE_MARGIN,
         }),
-        VerticalSpan:new{ width = Size.padding.large },
-        FrameContainer:new{
-            background = Blitbuffer.COLOR_WHITE,
-            bordersize = 0,
-            padding = Size.padding.large,
-            margin = 0,
-            HorizontalGroup:new{
-                align = "center",
-                IconWidget:new{
-                    file = icons_dir .. "account-avatar.svg",
-                    width = avatar_size,
-                    height = avatar_size,
-                },
-                HorizontalSpan:new{ width = Size.padding.large },
-                VerticalGroup:new{
-                    align = "left",
-                    name,
-                    VerticalSpan:new{ width = Size.padding.small },
-                    status,
-                },
-            },
-        },
-        VerticalSpan:new{ width = Size.padding.large },
-        padded(self:sectionHeader(_("Reading overview"))),
-        VerticalSpan:new{ width = Size.padding.small },
-        padded(self:metricRow(_("Total reading time"),
-            format_duration(stats and stats.total_read_time), "total", "metric-time.svg")),
-        VerticalSpan:new{ width = Size.padding.small },
-        padded(self:metricRow(_("Reading days"),
-            stats and T(_("%1 days"), stats.read_days or 0) or PLACEHOLDER, "days", "metric-days.svg")),
-        VerticalSpan:new{ width = Size.padding.small },
-        padded(self:metricRow(_("Daily average"),
-            format_duration(stats and stats.day_average), "average", "metric-average.svg")),
-        VerticalSpan:new{ width = Size.padding.large },
-        padded(self:sectionHeader(_("Bookshelf"))),
-        VerticalSpan:new{ width = Size.padding.small },
-        padded(self:metricRow(_("On shelf"),
-            book_count(shelf and shelf.total), "shelf_total", "metric-shelf.svg")),
-        VerticalSpan:new{ width = Size.padding.small },
-        padded(self:metricRow(_("Downloaded"),
-            book_count(shelf and shelf.downloaded), "shelf_downloaded", "metric-download.svg")),
-        VerticalSpan:new{ width = Size.padding.small },
-        padded(self:metricRow(_("Finished"),
-            book_count(shelf and shelf.finished), "shelf_finished", "metric-finished.svg")),
-        VerticalSpan:new{ width = Size.padding.large },
-        padded(self.exit_button),
-        VerticalSpan:new{ width = Size.padding.large },
+        VerticalSpan:new{ width = PAGE_MARGIN },
+        inset(account_card),
+        VerticalSpan:new{ width = CARD_GAP },
+        inset(stats_card),
+        VerticalSpan:new{ width = CARD_GAP },
+        inset(shelf_card),
+        VerticalSpan:new{ width = PAGE_MARGIN },
     }
 
     self.scroll = ScrollableContainer:new{
@@ -226,7 +248,14 @@ function MyView:init()
     self.nav, self.nav_buttons = HomeNav.create("me", self, function(route)
         if self.on_home_nav then self.on_home_nav(route, self) end
     end)
-    self.scroll_height = math.max(1, self.screen_h - self.nav:getSize().h)
+
+    self.card_inner_width = self.screen_w - 2 * PAGE_MARGIN - 2 * CARD_PADDING
+    -- The exit button sits in its own band under the cards, so the page never
+    -- ends in a screenful of white on a tall display.
+    self.button_band_height = Screen:scaleBySize(46) + 2 * Size.padding.large
+    self.scroll_height = math.max(1,
+        self.screen_h - self.nav:getSize().h - self.button_band_height)
+
     local scroll = self:buildContent()
 
     FocusNav.apply(self, { { self.exit_button }, self.nav_buttons })
@@ -240,6 +269,10 @@ function MyView:init()
         VerticalGroup:new{
             align = "left",
             scroll,
+            CenterContainer:new{
+                dimen = Geom:new{ w = self.screen_w, h = self.button_band_height },
+                self.exit_button,
+            },
             self.nav,
         },
     }
