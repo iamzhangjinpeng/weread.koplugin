@@ -176,6 +176,12 @@ package.preload["weread.ui.library"] = function()
             bookshelf_opened = true
             return true
         end,
+        -- Launcher entry points are cold entries: drop the remembered page
+        -- before opening the shelf.
+        openBookshelfFromMenu = function(self)
+            self.shelf_view_pages = nil
+            return self:showBookshelf()
+        end,
     }
 end
 package.preload["weread.ui.annotations_controller"] = function()
