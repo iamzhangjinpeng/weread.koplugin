@@ -11,6 +11,9 @@ jobs:
   checks:
     name: Basic checks
     runs-on: ubuntu-latest
+    env:
+      # Keep this in sync with scripts/run_koreader_integration.sh.
+      KOREADER_COMMIT: 1e2fa5f1239028ab4b37acae833cdc86a71e5258
 
     steps:
       - name: Checkout
@@ -21,6 +24,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y luajit luarocks ripgrep libsqlite3-0
           sudo luarocks install luacheck
+
+      - name: Checkout pinned KOReader module tree
+        uses: actions/checkout@v6
+        with:
+          repository: koreader/koreader
+          ref: ${{ env.KOREADER_COMMIT }}
+          path: .koreader-modules
+          sparse-checkout: |
+            frontend
+            ffi
+            common
+          sparse-checkout-cone-mode: true
+
+      - name: KOReader module paths
+        run: python3 scripts/check_koreader_requires.py .koreader-modules
 
       - name: Lua namespace policy
         run: bash scripts/check_lua_namespace.sh
