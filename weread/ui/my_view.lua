@@ -65,9 +65,17 @@ end
 
 -- Label column width is fixed, so a value arriving later never shifts the
 -- row: only the value widget itself is replaced.
-function MyView:metricRow(label_text, value_text, key)
+function MyView:metricRow(label_text, value_text, key, icon_file)
     local row_width = self.screen_w - 2 * Size.padding.large
-    local label_width = math.floor(row_width * 0.52)
+    local icon_size = Screen:scaleBySize(22)
+    local icon_gap = Screen:scaleBySize(8)
+    local text_width = row_width - icon_size - icon_gap
+    local label_width = math.floor(text_width * 0.52)
+    local icon = IconWidget:new{
+        file = icons_dir .. icon_file,
+        width = icon_size,
+        height = icon_size,
+    }
     local label = TextWidget:new{
         text = label_text,
         face = Font:getFace("cfont", 18),
@@ -77,7 +85,7 @@ function MyView:metricRow(label_text, value_text, key)
     local value = TextWidget:new{
         text = value_text,
         face = Font:getFace("cfont", 18),
-        max_width = math.max(1, row_width - label_width - gap),
+        max_width = math.max(1, text_width - label_width - gap),
     }
     if key then
         self._metric_values = self._metric_values or {}
@@ -85,6 +93,8 @@ function MyView:metricRow(label_text, value_text, key)
     end
     return HorizontalGroup:new{
         align = "center",
+        icon,
+        HorizontalSpan:new{ width = icon_gap },
         label,
         HorizontalSpan:new{ width = gap },
         value,
@@ -167,24 +177,24 @@ function MyView:buildContent()
         padded(self:sectionHeader(_("Reading overview"))),
         VerticalSpan:new{ width = Size.padding.small },
         padded(self:metricRow(_("Total reading time"),
-            format_duration(stats and stats.total_read_time), "total")),
+            format_duration(stats and stats.total_read_time), "total", "metric-time.svg")),
         VerticalSpan:new{ width = Size.padding.small },
         padded(self:metricRow(_("Reading days"),
-            stats and T(_("%1 days"), stats.read_days or 0) or PLACEHOLDER, "days")),
+            stats and T(_("%1 days"), stats.read_days or 0) or PLACEHOLDER, "days", "metric-days.svg")),
         VerticalSpan:new{ width = Size.padding.small },
         padded(self:metricRow(_("Daily average"),
-            format_duration(stats and stats.day_average), "average")),
+            format_duration(stats and stats.day_average), "average", "metric-average.svg")),
         VerticalSpan:new{ width = Size.padding.large },
         padded(self:sectionHeader(_("Bookshelf"))),
         VerticalSpan:new{ width = Size.padding.small },
         padded(self:metricRow(_("On shelf"),
-            book_count(shelf and shelf.total), "shelf_total")),
+            book_count(shelf and shelf.total), "shelf_total", "metric-shelf.svg")),
         VerticalSpan:new{ width = Size.padding.small },
         padded(self:metricRow(_("Downloaded"),
-            book_count(shelf and shelf.downloaded), "shelf_downloaded")),
+            book_count(shelf and shelf.downloaded), "shelf_downloaded", "metric-download.svg")),
         VerticalSpan:new{ width = Size.padding.small },
         padded(self:metricRow(_("Finished"),
-            book_count(shelf and shelf.finished), "shelf_finished")),
+            book_count(shelf and shelf.finished), "shelf_finished", "metric-finished.svg")),
         VerticalSpan:new{ width = Size.padding.large },
         padded(self.exit_button),
         VerticalSpan:new{ width = Size.padding.large },
