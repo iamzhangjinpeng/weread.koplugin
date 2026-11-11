@@ -31,6 +31,7 @@ local PLACEHOLDER = "—"
 -- Cards share one padding and one page margin, so every edge lines up.
 local PAGE_MARGIN = Size.padding.large
 local CARD_PADDING = Size.padding.large
+local CARD_BORDER = Size.border.default
 local CARD_GAP = Screen:scaleBySize(10)
 local ROW_GAP = Screen:scaleBySize(10)
 local LABEL_COLUMN_RATIO = 0.40
@@ -72,7 +73,7 @@ function MyView:card(content)
         background = Blitbuffer.COLOR_WHITE,
         color = Blitbuffer.COLOR_LIGHT_GRAY,
         radius = Size.radius.window,
-        bordersize = Size.border.default,
+        bordersize = CARD_BORDER,
         padding = CARD_PADDING,
         margin = 0,
         content,
@@ -249,7 +250,12 @@ function MyView:init()
         if self.on_home_nav then self.on_home_nav(route, self) end
     end)
 
-    self.card_inner_width = self.screen_w - 2 * PAGE_MARGIN - 2 * CARD_PADDING
+    -- FrameContainer measures itself as content + 2*(border + padding). The
+    -- border has to come out of the content width too, or the card ends up 2px
+    -- wider than the page, which makes the scroll container think it can pan
+    -- sideways and paint a full-width scrollbar above the exit button.
+    self.card_inner_width = self.screen_w - 2 * PAGE_MARGIN
+        - 2 * CARD_PADDING - 2 * CARD_BORDER
     -- The exit button sits in its own band under the cards, so the page never
     -- ends in a screenful of white on a tall display.
     self.button_band_height = Screen:scaleBySize(46) + 2 * Size.padding.large
