@@ -656,6 +656,16 @@ function M:loadMyReadingStats(view, generation)
             return
         end
         if not HomeRequest.isCurrent(self, generation) or self.my_view ~= view then return end
+        -- The server's dayAverageReadTime divides by calendar days since the
+        -- account was created, not by readDays: a long-lived account that read
+        -- 40h in total shows "< 1 min". The My page wants the per-reading-day
+        -- average (totalReadTime / readDays), the same figure the WeRead app
+        -- shows. The stats page keeps the raw field on purpose: for its
+        -- weekly/monthly periods the calendar-day denominator matches what the
+        -- app itself reports for those periods.
+        if data and (data.read_days or 0) > 0 then
+            data.day_average = (data.total_read_time or 0) / data.read_days
+        end
         if view.setReadingStats then view:setReadingStats(data) end
     end, nil, { silent_offline = true })
 end
