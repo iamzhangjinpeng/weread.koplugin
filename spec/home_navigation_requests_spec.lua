@@ -9,6 +9,7 @@ end
 local events, stats_shown, stats_fetches, shelf_fetches = {}, 0, 0, 0
 local stats_modes = {}
 local stats_fetch_hook
+local existing_files, book_records = {}, {}
 package.preload["ui/uimanager"] = function()
     return { close = function(_, view)
         events[#events + 1] = "close:" .. view.name
@@ -25,7 +26,8 @@ end
 package.preload["weread.lib.logger"] = function() return { err = function() end } end
 package.preload["weread.lib.plugin_util"] = function()
     return { tr = function(text) return text end, T = function(text) return text end,
-        log_error = tostring, display_error = tostring, file_exists = function() return false end }
+        log_error = tostring, display_error = tostring,
+        file_exists = function(path) return existing_files[path] == true end }
 end
 package.preload["weread.lib.read_stats"] = function()
     return { fetch = function(_, mode)
@@ -66,7 +68,11 @@ local function newHost()
     local host = {
         account = account,
         settings = {
-            get = function(_, key) if key == "account" then return account end end,
+            get = function(_, key, default)
+                if key == "account" then return account end
+                if key == "books" then return book_records end
+                return default
+            end,
             is_cookie_configured = function() return true end,
             is_api_configured = function() return true end,
         },
@@ -284,5 +290,30 @@ local account_page = my_stats.home_view
 take(my_stats)()
 expect(account_page.stats ~= nil and stats_modes[#stats_modes] == "overall",
     "account page did not load overall reading totals")
+
+-- Shelf counts are local only: a record with cached chapters counts as
+-- downloaded without stat'ing every chapter file, and a record whose single
+-- file is gone does not count at all.
+local summary_host = newHost()
+summary_host.shelf_regular = {
+    { book_id = "a", finishReading = 1 },
+    { book_id = "b" },
+    { book_id = 3, finishReading = 1 },
+    { book_id = "d" },
+}
+book_records = {
+    a = { cached_full_book = "/cache/a.epub" },
+    b = { cached_chapters = { ["1"] = "/cache/b-1.html" } },
+    [3] = { cached_file = "/gone/c.html" },
+    d = {},
+}
+existing_files["/cache/a.epub"] = true
+summary_host:showMyPage()
+local summary = shown_account.shelf_summary
+expect(summary ~= nil and summary.total == 4, "account page did not count the shelf")
+expect(summary.downloaded == 2,
+    "account page counted downloads wrong: " .. tostring(summary.downloaded))
+expect(summary.finished == 2,
+    "account page counted finished books wrong: " .. tostring(summary.finished))
 
 print("home_navigation_requests_spec: " .. checks .. " checks")

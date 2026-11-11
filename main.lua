@@ -30,8 +30,9 @@ local WeReadPlugin = WidgetContainer:extend{
 }
 
 -- Stable entry point used by third-party launchers such as SimpleUI and ZenUI.
+-- Launchers are cold entries, so they start at the first shelf page.
 function WeReadPlugin:openBookshelf()
-    return self:showBookshelf()
+    return self:openBookshelfFromMenu()
 end
 
 -- Both SimpleUI and ZenUI discover conventional plugin launch methods.

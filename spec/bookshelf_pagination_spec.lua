@@ -394,4 +394,18 @@ host.shelf_group_key = "archive:7"
 host:onWeReadAccountChanged()
 expect(host.shelf_groups == nil and host.shelf_group_key == nil, "account switch retained old groups")
 
+-- A reader gesture or the end-of-book dialog opens the shelf through
+-- showBookshelf(): the page the reader left must survive. Only the menu and
+-- launcher entry points start over at page one.
+host.library_db.getShelf = function() return shelf end
+host.library_db.getShelfArchives = function() return {} end
+host.home_view, host.shelf_view = nil, nil
+host.shelf_view_pages = { books = 4, public_account = 1 }
+host:showBookshelf()
+expect(shown[#shown].data.page == 4 and host.shelf_view_pages.books == 4,
+    "a non-menu entry did not keep the shelf page")
+host:openBookshelfFromMenu()
+expect(shown[#shown].data.page == 1 and host.shelf_view_pages.books == 1,
+    "menu entry did not start at the first shelf page")
+
 print(("bookshelf_pagination_spec: %d checks"):format(checks))

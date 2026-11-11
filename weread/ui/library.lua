@@ -79,11 +79,16 @@ local function list_items_per_page()
     return math.max(4, perpage)
 end
 
+-- Cold entry from the tool menu or a launcher: start at the first page.
+-- A reader gesture or the end-of-book dialog opens the shelf through
+-- showBookshelf() directly, which keeps the page the reader left.
+function M:openBookshelfFromMenu(old_view)
+    self.shelf_view_pages = nil
+    return self:showBookshelf(old_view)
+end
+
 function M:showBookshelf(old_view)
     old_view = old_view or self.home_view
-    -- No active page means the plugin was entered from the menu: start at the
-    -- first page. Switching tabs keeps the page the reader was on.
-    if not old_view then self.shelf_view_pages = nil end
     local cached = self.library_db and self.library_db:getShelf() or nil
     local archives = self.library_db and self.library_db:getShelfArchives() or nil
     if cached and (#cached > 0 or archives ~= nil) then

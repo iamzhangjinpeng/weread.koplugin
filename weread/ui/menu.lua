@@ -119,7 +119,7 @@ function M:getMainMenuItems()
         {
             text = _("Bookshelf"),
             callback = self:safeCallback(_("Bookshelf"), function()
-                self:showBookshelf()
+                self:openBookshelfFromMenu()
             end),
         },
         {
