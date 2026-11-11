@@ -7,6 +7,7 @@ local function expect(condition, message)
 end
 
 local events, stats_shown, stats_fetches, shelf_fetches = {}, 0, 0, 0
+local stats_modes = {}
 local stats_fetch_hook
 package.preload["ui/uimanager"] = function()
     return { close = function(_, view)
@@ -27,10 +28,11 @@ package.preload["weread.lib.plugin_util"] = function()
         log_error = tostring, display_error = tostring, file_exists = function() return false end }
 end
 package.preload["weread.lib.read_stats"] = function()
-    return { fetch = function()
+    return { fetch = function(_, mode)
         stats_fetches = stats_fetches + 1
+        stats_modes[#stats_modes + 1] = mode
         if stats_fetch_hook then stats_fetch_hook() end
-        return { mode = "monthly" }
+        return { mode = mode, total_read_time = 3600, read_days = 12, day_average = 60 }
     end }
 end
 package.preload["weread.ui.read_stats_view"] = function()
@@ -45,13 +47,20 @@ package.preload["weread.ui.my_view"] = function()
     return { show = function(data, callbacks)
         shown_account = data
         events[#events + 1] = "show:my"
-        return { name = "my", callbacks = callbacks }
+        return { name = "my", callbacks = callbacks,
+            setReadingStats = function(self, stats) self.stats = stats end }
     end }
 end
 
 local HomeRequest = require("weread.ui.home_request")
 local Library = require("weread.ui.library")
 local Report = require("weread.ui.read_report")
+local function take(host)
+    local pending = host.pendings and table.remove(host.pendings, 1)
+    assert(pending, "no pending online task")
+    return pending
+end
+
 local function newHost()
     local account = { name = "Reader", login_method = "qr", login_time = 1 }
     local host = {
@@ -68,7 +77,11 @@ local function newHost()
         requireLogin = function() return true end,
         showBusy = function(self) self.busy_message = {} end,
         closeBusy = function(self) self.busy_message = nil end,
-        runOnlineTask = function(self, _, callback) self.pending = callback return true end,
+        runOnlineTask = function(self, _, callback)
+            self.pendings = self.pendings or {}
+            table.insert(self.pendings, callback)
+            return true
+        end,
         showInfo = function() end,
         applyShelfSnapshot = function(self) self.snapshot_applied = true end,
         showShelfView = function(self) self.shelf_shown = true end,
@@ -81,7 +94,7 @@ local host = newHost()
 local shelf = { name = "shelf" }
 host.home_view, host.shelf_view = shelf, shelf
 host:showReadStats(shelf)
-local pending = host.pending
+local pending = take(host)
 host:showMyPage(shelf)
 local my_page = host.home_view
 host:showBusy("newer operation")
@@ -94,7 +107,7 @@ expect(shown_account.account_name == "Reader", "the stored account nickname was 
 
 local closed = newHost()
 closed:showReadStats()
-local closed_pending = closed.pending
+local closed_pending = take(closed)
 closed:closeWeReadUI()
 closed_pending()
 expect(stats_shown == 0 and stats_fetches == 0,
@@ -112,7 +125,7 @@ local during_fetch = newHost()
 during_fetch.home_view = { name = "shelf" }
 stats_fetch_hook = function() HomeRequest.begin(during_fetch) end
 during_fetch:showReadStats(during_fetch.home_view)
-during_fetch.pending()
+take(during_fetch)()
 stats_fetch_hook = nil
 expect(stats_shown == 0, "a result invalidated during fetch displayed statistics")
 
@@ -122,7 +135,7 @@ local current = newHost()
 local source = { name = "shelf" }
 current.home_view, current.shelf_view = source, source
 current:showReadStats(source)
-current.pending()
+take(current)()
 expect(current.home_view.name == "stats" and events[1] == "show:stats" and events[2] == "close:shelf",
     "successful navigation did not show statistics before closing the shelf")
 
@@ -153,7 +166,7 @@ local function redrawWhileStatsPending()
     local original = { name = "shelf" }
     probe.home_view, probe.shelf_view = original, original
     probe:showReadStats(original)
-    local pending_stats = probe.pending
+    local pending_stats = take(probe)
     probe.showShelfView = nil
     probe:showShelfView("books", nil, original, {
         skip_cover_fetch_once = true, preserve_home_request = true,
@@ -225,9 +238,10 @@ local stale_source = stale.home_view
 stale:showMyPage(stale_source)
 local retained = stale.home_view
 events = {}
+local pendings_before = #(stale.pendings or {})
 stale_source.callbacks.on_home_nav("stats", stale_source)
-expect(stale.home_view == retained and stale.pending == nil and #events == 0,
-    "an obsolete navigation callback replaced a newer page")
+expect(stale.home_view == retained and #(stale.pendings or {}) == pendings_before
+    and #events == 0, "an obsolete navigation callback replaced a newer page")
 
 -- Closing a source page cancels its pending shelf refresh without touching it.
 local refresh = newHost()
@@ -235,7 +249,7 @@ local refresh_calls = 0
 local closed_shelf = { name = "shelf", setRefreshing = function() refresh_calls = refresh_calls + 1 end }
 refresh.home_view, refresh.shelf_view = closed_shelf, closed_shelf
 refresh:refreshBookshelf(closed_shelf)
-local refresh_pending = refresh.pending
+local refresh_pending = take(refresh)
 refresh:closeWeReadHomeView(closed_shelf)
 refresh_pending()
 expect(shelf_fetches == 0 and not refresh.shelf_shown and refresh_calls == 1,
@@ -249,7 +263,7 @@ end }
 cancelled_refresh.home_view, cancelled_refresh.shelf_view = retained_shelf, retained_shelf
 cancelled_refresh:refreshBookshelf(retained_shelf)
 HomeRequest.begin(cancelled_refresh)
-cancelled_refresh.pending()
+take(cancelled_refresh)()
 expect(refresh_states[1] == true and refresh_states[2] == false
     and cancelled_refresh.home_view == retained_shelf,
     "cancelled refresh left the retained shelf's refresh button disabled")
@@ -259,8 +273,16 @@ local valid_refresh = newHost()
 local active_shelf = { name = "shelf", setRefreshing = function() end }
 valid_refresh.home_view, valid_refresh.shelf_view = active_shelf, active_shelf
 valid_refresh:refreshBookshelf(active_shelf)
-valid_refresh.pending()
+take(valid_refresh)()
 expect(shelf_fetches == 1 and valid_refresh.snapshot_applied and valid_refresh.shelf_shown,
     "a valid shelf refresh did not display the updated shelf")
+
+-- The account page shows at once and fills its totals afterwards.
+local my_stats = newHost()
+my_stats:showMyPage({ name = "shelf" })
+local account_page = my_stats.home_view
+take(my_stats)()
+expect(account_page.stats ~= nil and stats_modes[#stats_modes] == "overall",
+    "account page did not load overall reading totals")
 
 print("home_navigation_requests_spec: " .. checks .. " checks")

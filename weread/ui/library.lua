@@ -8,6 +8,7 @@ local InputDialog = require("ui/widget/inputdialog")
 local HomeRequest = require("weread.ui.home_request")
 local logger = require("weread.lib.logger")
 local ProgressbarDialog = require("ui/widget/progressbardialog")
+local ReadStats = require("weread.lib.read_stats")
 local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
 local WeRead = require("weread.lib.protocol")
@@ -21,6 +22,15 @@ local file_exists = PluginUtil.file_exists
 
 local M = {}
 local sortBooks
+
+-- Single source of truth for the full-screen WeRead pages. Adding a page means
+-- one entry here plus one route below; no other field list needs updating.
+local HOME_PAGE_FIELDS = { "home_view", "shelf_view", "read_stats_view", "my_view" }
+local HOME_ROUTES = {
+    shelf = "showBookshelf",
+    stats = "showReadStats",
+    me = "showMyPage",
+}
 
 local function cover_subprocess_runner()
     local ok, ffiutil = pcall(require, "ffi/util")
@@ -71,6 +81,9 @@ end
 
 function M:showBookshelf(old_view)
     old_view = old_view or self.home_view
+    -- No active page means the plugin was entered from the menu: start at the
+    -- first page. Switching tabs keeps the page the reader was on.
+    if not old_view then self.shelf_view_pages = nil end
     local cached = self.library_db and self.library_db:getShelf() or nil
     local archives = self.library_db and self.library_db:getShelfArchives() or nil
     if cached and (#cached > 0 or archives ~= nil) then
@@ -105,14 +118,15 @@ function M:closeWeReadUI()
     -- Close from the topmost view down so no full-screen WeRead widget remains
     -- in UIManager's window stack after a document is opened.
     local seen = {}
-    for _, field in ipairs({
-        "_chapter_list_view",
-        "_book_detail_view",
-        "read_stats_view",
-        "my_view",
-        "home_view",
-        "shelf_view",
-    }) do
+    for _, field in ipairs({ "_chapter_list_view", "_book_detail_view" }) do
+        local view = self[field]
+        self[field] = nil
+        if view and not seen[view] then
+            seen[view] = true
+            UIManager:close(view)
+        end
+    end
+    for _, field in ipairs(HOME_PAGE_FIELDS) do
         local view = self[field]
         self[field] = nil
         if view and not seen[view] then
@@ -125,7 +139,7 @@ end
 function M:forgetWeReadHomeView(view)
     if not view then return end
     if self.home_view == view then HomeRequest.begin(self) end
-    for _, field in ipairs({ "home_view", "shelf_view", "read_stats_view", "my_view" }) do
+    for _, field in ipairs(HOME_PAGE_FIELDS) do
         if self[field] == view then self[field] = nil end
     end
 end
@@ -582,17 +596,62 @@ function M:showWeReadHomePage(page, old_view)
         end
         if old_view ~= self.home_view then return end
     end
-    if page == "shelf" then
-        return self:showBookshelf(old_view)
-    elseif page == "stats" then
-        return self:showReadStats(old_view)
-    elseif page == "me" then
-        return self:showMyPage(old_view)
+    local method = HOME_ROUTES[page]
+    if not method or not self[method] then return end
+    return self[method](self, old_view)
+end
+
+-- Local-only counts for the account page. Records are trusted for chapter
+-- caches: stat'ing every cached chapter of a large shelf would freeze the UI.
+function M:buildMyPageShelfSummary()
+    local books = self.shelf_regular
+    if type(books) ~= "table" then
+        books = self.library_db and self.library_db:getShelf() or nil
     end
+    if type(books) ~= "table" then return nil end
+    local saved_books = self.settings:get("books", {})
+    local summary = { total = #books, downloaded = 0, finished = 0 }
+    for _i, book in ipairs(books) do
+        if book.finishReading == 1 then
+            summary.finished = summary.finished + 1
+        end
+        local book_id = book.book_id or book.bookId
+        local record = book_id and (saved_books[book_id] or saved_books[tostring(book_id)]) or nil
+        if type(record) == "table" then
+            local has_file = (record.cached_full_book and file_exists(record.cached_full_book))
+                or (record.cached_file and file_exists(record.cached_file))
+            local has_chapters = type(record.cached_chapters) == "table"
+                and next(record.cached_chapters) ~= nil
+            if has_file or has_chapters then
+                summary.downloaded = summary.downloaded + 1
+            end
+        end
+    end
+    return summary
+end
+
+-- Overall totals reuse the statistics data layer. The page is already visible,
+-- so this only refreshes three labels; failures leave the placeholders.
+function M:loadMyReadingStats(view, generation)
+    if not (self.settings:is_api_configured() or self.settings:is_cookie_configured()) then
+        return
+    end
+    self:runOnlineTask(_("Reading statistics"), function()
+        if not HomeRequest.isCurrent(self, generation) or self.my_view ~= view then return end
+        local ok, data = pcall(function()
+            return ReadStats.fetch(self.client, "overall")
+        end)
+        if not ok then
+            logger.warn("load account reading stats failed:", log_error(data))
+            return
+        end
+        if not HomeRequest.isCurrent(self, generation) or self.my_view ~= view then return end
+        if view.setReadingStats then view:setReadingStats(data) end
+    end, nil, { silent_offline = true })
 end
 
 function M:showMyPage(old_view)
-    HomeRequest.begin(self)
+    local generation = HomeRequest.begin(self)
     local MyView = require("weread.ui.my_view")
     old_view = old_view or self.home_view
     local account = self.settings:get("account", {})
@@ -614,6 +673,7 @@ function M:showMyPage(old_view)
         account = account,
         account_name = account_name,
         account_status = account_status,
+        shelf_summary = self:buildMyPageShelfSummary(),
     }, {
         on_closed = function(closed_view)
             self:forgetWeReadHomeView(closed_view)
@@ -628,6 +688,7 @@ function M:showMyPage(old_view)
     self.my_view = view
     self.home_view = view
     if old_view then self:closeWeReadHomeView(old_view) end
+    self:loadMyReadingStats(view, generation)
     return view
 end
 

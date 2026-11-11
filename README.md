@@ -1,11 +1,11 @@
 # WeRead KOReader Plugin
 
-这是 [finlater/weread.koplugin](https://github.com/finlater/weread.koplugin) 的个人 fork。当前界面改造位于 [`feature/weread-home`](https://github.com/iamzhangjinpeng/weread.koplugin/tree/feature/weread-home) 分支；本版基于原项目 1.7.0，标记为 **1.6.100**，便于需要时通过插件内的在线更新恢复原版。
+这是 [finlater/weread.koplugin](https://github.com/finlater/weread.koplugin) 的个人 fork。当前界面改造位于 [`feature/weread-home`](https://github.com/iamzhangjinpeng/weread.koplugin/tree/feature/weread-home) 分支；本版基于原项目 1.7.0，标记为 **1.6.101**，便于需要时通过插件内的在线更新恢复原版。
 
 ## 本分支的界面
 
 - 手动打开微信读书后进入书架；书架、阅读统计和“我的”页面底部提供相同的栏目切换。
-- “我的”显示账号名称和状态，并可退出微信读书页面，返回进入前的 KOReader 界面。
+- “我的”显示账号名称和状态、阅读概览（累计阅读、阅读天数、日均阅读）与书架概览（在架、已下载、已读完），并可返回进入前的 KOReader 界面。阅读概览复用统计接口，离线时保留占位符。
 - 统计原有入口也会显示底栏。书架数据、统计、下载、进度同步和阅读仍沿用原插件的处理方式。
 - 书架可使用原有的列表或封面模式，按原设置排序；本版没有新增单独的“继续阅读”卡片。
 
@@ -62,7 +62,7 @@ WeReader 闭源版不包含微信读书会员或付费书籍；可阅读内容�
 
 > ⚠️ 建议使用 **KOReader 2026.03 或更高版本**。旧版本可能无法正常加载或使用插件，例如「工具」菜单中找不到「微信读书」。详见 [#14](https://github.com/finlater/weread.koplugin/issues/14)。
 
-1. 前往 [本 fork 的发行页面](https://github.com/iamzhangjinpeng/weread.koplugin/releases/tag/v1.6.100) 下载 `weread.koplugin-v1.6.100.zip` 安装包。
+1. 前往 [本 fork 的发行页面](https://github.com/iamzhangjinpeng/weread.koplugin/releases/tag/v1.6.101) 下载 `weread.koplugin-v1.6.101.zip` 安装包。
 2. 解压安装包，得到 `weread.koplugin` 文件夹。
 3. 将该文件夹复制到 KOReader 的 `plugins` 目录：
 
