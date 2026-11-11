@@ -32,6 +32,7 @@ local PLACEHOLDER = "—"
 local function format_duration(seconds)
     if seconds == nil then return PLACEHOLDER end
     local total = math.max(0, math.floor(tonumber(seconds) or 0))
+    if total < 60 then return _("< 1 min") end
     local hours = math.floor(total / 3600)
     local minutes = math.floor((total % 3600) / 60)
     if hours > 0 and minutes > 0 then return T(_("%1 h %2 min"), hours, minutes) end

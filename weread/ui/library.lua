@@ -633,7 +633,9 @@ end
 -- Overall totals reuse the statistics data layer. The page is already visible,
 -- so this only refreshes three labels; failures leave the placeholders.
 function M:loadMyReadingStats(view, generation)
-    if not (self.settings:is_api_configured() or self.settings:is_cookie_configured()) then
+    -- Statistics go through the skill gateway, which needs the API key; a
+    -- cookie-only session would fail on every visit.
+    if not self.settings:is_api_configured() then
         return
     end
     self:runOnlineTask(_("Reading statistics"), function()
