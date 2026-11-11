@@ -230,7 +230,6 @@ local queued_source = queued.home_view
 queued:showShelfView("books", nil, queued_source, {
     skip_cover_fetch_once = true, preserve_home_request = true,
 })
-local queued_replacement = queued.home_view
 events = {}
 queued_source.callbacks.on_home_nav("me", queued_source)
 expect(queued.home_view.name == "my" and events[1] == "show:my"

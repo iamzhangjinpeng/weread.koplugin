@@ -580,8 +580,8 @@ late_ticks[1]()
 expect(search_calls == 1, "header action stayed blocked after popup closed")
 
 late_ticks = {}
-local late_page, page_calls = nil, 0
-late_page = LibraryView.show({
+local page_calls = 0
+local late_page = LibraryView.show({
     mode = "books", books = books, accounts = {}, paged = true, page = 1, page_size = 3,
 }, { on_page_changed = function() page_calls = page_calls + 1 end })
 late_page._page_buttons[3].callback()
