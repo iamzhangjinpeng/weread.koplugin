@@ -82,11 +82,16 @@ function MyView:metricRow(label_text, value_text, key, icon_file)
         face = Font:getFace("cfont", 18),
         max_width = label_width,
     }
-    local gap = math.max(Size.padding.small, label_width - label:getSize().w)
+    local label_size = label:getSize()
+    local gap = math.max(Size.padding.small, label_width - label_size.w)
+    -- The value gets whatever the label column did not consume. Measuring the
+    -- rendered label keeps the two columns aligned without charging the value
+    -- for the column width twice, which used to leave it a few characters wide.
+    local value_width = row_width - icon_size - icon_gap - label_size.w - gap
     local value = TextWidget:new{
         text = value_text,
         face = Font:getFace("cfont", 18),
-        max_width = math.max(1, text_width - label_width - gap),
+        max_width = math.max(1, value_width),
     }
     if key then
         self._metric_values = self._metric_values or {}
