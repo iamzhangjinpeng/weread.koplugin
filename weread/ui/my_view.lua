@@ -12,6 +12,7 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local ScrollableContainer = require("ui/widget/container/scrollablecontainer")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
@@ -92,9 +93,17 @@ function MyView:sectionHeader(text)
     }
 end
 
--- Label left, figure right. The label column is a fixed share of the card so
--- every figure starts on the same vertical line, and the figure gets the rest
--- of the row without being charged for the label column twice.
+-- Label left, figure right. Both columns are fixed shares of the card: the
+-- label column keeps every label starting on the same line, the figure column
+-- is a fixed-width slot the figure sits at the right end of. The slot width has
+-- to be fixed, because the figures arrive from the network a moment after the
+-- page is shown and a slot that hugged the text would resize every row on
+-- arrival.
+--
+-- Right alignment is what makes the card look even. With the figures flush left
+-- the right half of every row was bare white, so the card read as though its
+-- content were shoved against the left edge -- and the left margin, though
+-- exactly equal to the right one, looked wider.
 function MyView:metricRow(label_text, value_text, key)
     local inner_width = self.card_inner_width
     local label_width = math.floor(inner_width * LABEL_COLUMN_RATIO)
@@ -104,22 +113,34 @@ function MyView:metricRow(label_text, value_text, key)
         fgcolor = MUTED_TEXT,
         max_width = label_width,
     }
-    local gap = math.max(Size.padding.small, label_width - label:getSize().w)
+    -- label + gap + slot must add up to inner_width exactly. Deriving the slot
+    -- from the gap (rather than the other way round) keeps that true even if a
+    -- label is ever long enough to fill its whole column.
+    local label_size = label:getSize()
+    local gap = math.max(Size.padding.small, label_width - label_size.w)
+    local value_width = math.max(1, inner_width - label_size.w - gap)
     local value = TextWidget:new{
         text = value_text,
         face = Font:getFace("cfont", 21),
         bold = true,
-        max_width = math.max(1, inner_width - label_width),
+        max_width = value_width,
     }
     if key then
         self._metric_values = self._metric_values or {}
         self._metric_values[key] = value
     end
+    -- RightContainer paints its child against the right edge of a fixed dimen,
+    -- and re-reads the child's width on every paint, so setText() moves the
+    -- figure without disturbing the row's layout.
+    local value_slot = RightContainer:new{
+        dimen = Geom:new{ w = value_width, h = value:getSize().h },
+        value,
+    }
     return HorizontalGroup:new{
         align = "center",
         label,
         HorizontalSpan:new{ width = gap },
-        value,
+        value_slot,
     }
 end
 
