@@ -457,7 +457,10 @@ function M:showShelfView(mode, keyword, old_view, options)
     local paged = cover_mode or shelf_settings.paginated ~= false
     local page = paged and (options.page or self.shelf_view_pages[mode] or 1) or 1
     local source = mode == "public_account" and accounts or books
-    local show_home_nav = options.wp_enable ~= false
+    -- Kept separate from wp_enable on purpose: that flag only disables the
+    -- public-account tab. The report target picker happens to want neither, so
+    -- it passes both -- but nothing forces the two to move together.
+    local show_home_nav = options.show_home_nav ~= false
     local layout = LibraryView.getLayout(cover_mode, #source, mode, show_home_nav)
     local cover_layout = cover_mode and layout or nil
     local page_size = layout.page_size

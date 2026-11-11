@@ -694,7 +694,8 @@ expect(long_selector.items_per_page < #long_selector.item_table and long_selecto
         and long_selector.page_info.handleEvent == nil,
     "overflowing picker lost pagination or exceeded the screen")
 if native_widgets then
-    local layout = LibraryView.getLayout(true, 100)
+    -- Matches the production shelf, which always carries the bottom nav.
+    local layout = LibraryView.getLayout(true, 100, nil, true)
     expect(layout.rows == 3 and layout.page_size == 9, "compact 600x800 shelf did not reclaim a third cover row")
     local native_view = LibraryView.show({
         mode = "books", books = books, accounts = {}, paged = true,
@@ -704,7 +705,7 @@ if native_widgets then
     expect(native_view[1][1]:getSize().h == 800, "native header, viewport and pager exceed the screen height")
     expect(native_view[1][1][1]:getSize().h == 73, "native header is taller than a single button row")
     expect(native_view[1][1][3]:getSize().h == 54, "native pager padding escaped its reserved height")
-    local list_layout = LibraryView.getLayout(false, 100)
+    local list_layout = LibraryView.getLayout(false, 100, nil, true)
     local native_list = LibraryView.show({
         mode = "books", books = books, accounts = {}, paged = true, page_size = list_layout.page_size,
     }, {})

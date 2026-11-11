@@ -253,12 +253,11 @@ function MyView:buildContent()
         VerticalSpan:new{ width = PAGE_MARGIN },
     }
 
-    self.scroll = ScrollableContainer:new{
+    return ScrollableContainer:new{
         dimen = Geom:new{ w = self.screen_w, h = self.scroll_height },
         show_parent = self,
         content,
     }
-    return self.scroll
 end
 
 function MyView:init()

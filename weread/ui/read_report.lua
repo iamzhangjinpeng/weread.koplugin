@@ -216,6 +216,7 @@ function M:showReadReportBookPicker()
     self:refreshBookshelf(nil, {
         mode = "books",
         wp_enable = false,
+        show_home_nav = false,
         title = _("Select a book to report reading time"),
         on_select = function(book, selected_mode, view)
             if selected_mode ~= "books" then return end
