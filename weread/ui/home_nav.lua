@@ -19,8 +19,13 @@ local function _(text)
     return I18n.tr(text)
 end
 
+-- Must match what create() actually measures, or getLayout() reserves the wrong
+-- height and the shelf paginates against a space it does not have. The bar is a
+-- LineWidget plus a row of Buttons, and FrameContainer counts both of a Button's
+-- borders on top of its content height: 1 * thin for the line, 2 * thin for the
+-- row. Adding only one left the estimate 2px short.
 function M.getHeight()
-    return Screen:scaleBySize(52) + Size.border.thin
+    return Screen:scaleBySize(52) + 3 * Size.border.thin
 end
 
 function M.create(active, parent, on_select)
