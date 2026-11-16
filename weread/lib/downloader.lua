@@ -983,72 +983,10 @@ function Downloader:_startFootnotes(dl)
     self:_scheduleGuarded(dl, function() self:_footnoteStep(dl) end)
 end
 
-function Downloader:_finishChapter(dl)
-    if dl.cancelled then self:_step(dl); return end
-    if not dl.current then return end
-    local chapter = dl.current.chapter
-    local cache = self.settings:get("cache")
-    -- Image packaging is network-heavy; bail before opening long HTTP waits.
-    if cache.download_book_images
-        and self.is_connected and not self.is_connected() then
-        self:_pauseOffline(dl, "link_down")
-        return
-    end
-    local stage_text
-    if cache.download_book_images then
-        stage_text = T(_("Downloading images · chapter %1/%2"), tostring(dl.index), tostring(dl.total))
-    else
-        stage_text = T(_("Processing chapter %1/%2"), tostring(dl.index), tostring(dl.total))
-    end
-    self:_setStage(dl,
-        stage_text, dl.index - 0.1)
-    local started = time.now()
-    local ok, result = pcall(function()
-        local function finalize()
-            local xhtml, assets = Content.finalize_single_chapter_content(
-                self.client, self.settings, dl.book, chapter, dl.current.xhtml, dl.state)
-            return { xhtml = xhtml, assets = assets, state = dl.state }
-        end
-        if cache.download_book_images then return self:_runInterruptible(dl, finalize) end
-        return finalize()
-    end)
-    if dl.cancelled then self:_step(dl); return end
-    self:_perf(dl, "images_and_finalize", started, "ok=", tostring(ok))
-    if not ok then
-        if self.is_connected and not self.is_connected() then
-            self:_pauseOffline(dl, "link_down")
-            return
-        end
-        if is_transport_error(result) then
-            local uid = tostring(chapter.chapterUid or dl.index)
-            dl.chapter_finalize_retries = dl.chapter_finalize_retries or {}
-            local attempt = (dl.chapter_finalize_retries[uid] or 0) + 1
-            dl.chapter_finalize_retries[uid] = attempt
-            if attempt > 1 then
-                dl.chapter_finalize_retries[uid] = nil
-                self:_pauseOffline(dl, result)
-                return
-            end
-            logger.warn("chapter finalize transport failed; retrying:",
-                "index=", tostring(dl.index) .. "/" .. tostring(dl.total),
-                "chapter_uid=", uid, "attempt=", tostring(attempt),
-                "error=", log_error(result))
-            self:_setStage(dl,
-                T(_("Retrying chapter %1/%2 · attempt %3"),
-                    tostring(dl.index), tostring(dl.total), tostring(attempt)),
-                dl.index - 0.1)
-            self:_scheduleGuarded(dl, function() self:_finishChapter(dl) end, 0.8)
-            return
-        end
-        self:_failChapter(dl, result)
-        return
-    end
-    local xhtml, chapter_assets = result.xhtml, result.assets
-    dl.state = result.state
+-- Persist a chapter that was already fetched+finalized in one interruptible
+-- child. Keeps checkpoints/settings/UI on the parent side.
+function Downloader:_commitChapter(dl, chapter, xhtml, chapter_assets)
     local uid = tostring(chapter.chapterUid or dl.index)
-    if dl.chapter_finalize_retries then
-        dl.chapter_finalize_retries[uid] = nil
-    end
     if dl.resumable then
         Content.save_full_download_css(dl.workspace, dl.state.css)
         Content.save_full_download_chapter(dl.workspace, chapter, dl.index, xhtml)
@@ -1375,20 +1313,31 @@ function Downloader:_step(dl)
             chapter.title or tostring(chapter.chapterUid)),
         dl.index - 1)
     local started = time.now()
+    -- Source + image finalize share one trapper child so a chapter pays one
+    -- fork instead of two, matching the prefetch worker shape.
     local ok, result = pcall(function()
         return self:_runInterruptible(dl, function()
             local xhtml = Content.fetch_single_chapter_source(
                 self.client, self.settings, dl.book, chapter, dl.state)
-            return { xhtml = xhtml, state = dl.state, book = reader_book(dl.book) }
+            local assets
+            xhtml, assets = Content.finalize_single_chapter_content(
+                self.client, self.settings, dl.book, chapter, xhtml, dl.state)
+            return {
+                xhtml = xhtml,
+                assets = assets,
+                state = dl.state,
+                book = reader_book(dl.book),
+            }
         end)
     end)
     if dl.cancelled then self:_step(dl); return end
-    self:_perf(dl, "chapter_source", started, "ok=", tostring(ok))
+    self:_perf(dl, "chapter_source_and_finalize", started, "ok=", tostring(ok))
     if not ok then
         self:_retryChapterSource(dl, result)
         return
     end
     local xhtml = result.xhtml
+    local chapter_assets = result.assets or {}
     dl.state = result.state
     apply_reader_book(dl.book, result.book)
     if dl.chapter_source_retries then
@@ -1403,8 +1352,7 @@ function Downloader:_step(dl)
         logger.warn("footnote scan failed; chapter will keep original footnote markup:",
             "chapter_uid=", uid, "error=", log_error(scan))
     end
-    dl.current = { chapter = chapter, xhtml = xhtml }
-    self:_finishChapter(dl)
+    self:_commitChapter(dl, chapter, xhtml, chapter_assets)
 end
 
 return Downloader

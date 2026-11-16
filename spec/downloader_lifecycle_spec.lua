@@ -57,6 +57,9 @@ package.preload["weread.lib.content"] = function()
         fetch_single_chapter_source = function()
             error("injected transient server error")
         end,
+        finalize_single_chapter_content = function(_client, _settings, _book, _chapter, xhtml)
+            return xhtml, {}
+        end,
     }
 end
 package.preload["weread.ui.download_dialog"] = function()
@@ -295,7 +298,7 @@ end
 expect(start_selected(), "interruptible preparation did not start")
 cancel_job(downloader._active_job, 0)
 
-for _, stage in ipairs({ "source", "images", "cover" }) do
+for _, stage in ipairs({ "chapter", "cover" }) do
     local dl = {
         book = { title = "Book", cover = "https://example.com/cover.jpg" },
         chapters = chapters, total = 2, index = stage == "cover" and 3 or 1,
@@ -308,19 +311,16 @@ for _, stage in ipairs({ "source", "images", "cover" }) do
             completion_calls = completion_calls + 1
         end,
     }
-    if stage == "images" then dl.current = { chapter = chapters[1], xhtml = "body" } end
     if stage == "cover" then dl.selected = chapters end
     downloader._active_job = dl
     downloader:_beginStandby()
     downloader:_ensureProgressDialog(dl)
     expect(dialog.options.description and dialog.options.description:find("resume", 1, true),
         "full-book progress did not explain cancellation and resume")
-    trapper:wrap(function()
-        if stage == "images" then downloader:_finishChapter(dl) else downloader:_step(dl) end
-    end)
+    trapper:wrap(function() downloader:_step(dl) end)
     cancel_job(dl, 0)
 end
-expect(completion_calls == 3, "network-stage cancellation duplicated completion")
+expect(completion_calls == 2, "network-stage cancellation duplicated completion")
 
 local transferred = {
     book = { book_id = "book", token = "stale" }, chapters = chapters, total = 2, index = 1,
@@ -331,14 +331,17 @@ downloader._active_job = transferred
 downloader:_beginStandby()
 downloader:_ensureProgressDialog(transferred)
 trapper:wrap(function() downloader:_step(transferred) end)
-resumed({ xhtml = "<p>source</p>", state = { css = "body{}" },
-    book = { book_id = "book", psvts = "fresh" } })
-expect(child_pending and transferred.state.css == "body{}"
-    and transferred.book.psvts == "fresh" and transferred.book.token == nil,
-    "source result lost CSS/session changes or retained stale credentials")
-resumed({ xhtml = "<p>final</p>", assets = {}, state = { css = "body{}" } })
+resumed({
+    xhtml = "<p>final</p>",
+    assets = {},
+    state = { css = "body{}" },
+    book = { book_id = "book", psvts = "fresh" },
+})
 expect(transferred.bodies["1"] == "<p>final</p>" and transferred.index == 2
-    and #transferred.selected == 1, "finalized child result was not saved in the parent")
+    and #transferred.selected == 1
+    and transferred.state.css == "body{}"
+    and transferred.book.psvts == "fresh" and transferred.book.token == nil,
+    "combined chapter child result was not saved in the parent")
 dialog.options.buttons[1][1].callback()
 downloader:_step(transferred)
 
