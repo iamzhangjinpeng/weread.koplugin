@@ -46,6 +46,12 @@ local function display_error(err)
     return text
 end
 
+-- Must match weread.lib.client TRANSPORT_PREFIX. Kept as a literal here so
+-- downloader specs do not pull in socket.http / ltn12.
+local function is_transport_error(err)
+    return tostring(err or ""):find("weread.transport:", 1, true) ~= nil
+end
+
 local READER_BOOK_FIELDS = {
     "book_id", "title", "author", "psvts", "pclts", "token", "reader_url",
     "chapter_uid", "chapter_idx", "chapter_offset", "progress", "summary",
@@ -175,6 +181,42 @@ function Downloader:_notifyCompletion(dl, ok, value)
     if not called then
         logger.warn("download completion callback failed:",
             log_error(err))
+    end
+end
+
+-- Always clear the active job after a failed or cancelled run. Resumable
+-- full-book downloads keep their on-disk checkpoint, but leaving _active_job
+-- set blocks every later start until KOReader is restarted.
+function Downloader:_endFailedJob(dl, reason)
+    if not dl then return end
+    if dl.resumable then
+        self:_preserveWorkspace(dl, reason)
+    else
+        self:_releaseStandby(dl)
+        self:_cleanupWorkspace(dl)
+        if dl.progress_dialog then
+            dl.progress_dialog:close()
+            dl.progress_dialog = nil
+        end
+    end
+    self:_notifyCompletion(dl, false, reason)
+    self:_finishJob(dl)
+end
+
+function Downloader:_pauseOffline(dl, reason)
+    local resumable = dl and dl.resumable
+    logger.warn("download paused: network unavailable",
+        "reason=", tostring(reason or "offline"),
+        "index=", tostring(dl and dl.index), "total=", tostring(dl and dl.total))
+    self:_endFailedJob(dl, "offline")
+    if dl and not dl.prefetch then
+        if resumable then
+            self.show_info(_(
+                "Network disconnected during download.\n\nCompleted chapters were kept. Choose Download full book again to continue."
+            ))
+        else
+            self.show_info(_("No network connection. Please connect Wi-Fi and try again."))
+        end
     end
 end
 
@@ -481,18 +523,7 @@ function Downloader:_scheduleGuarded(dl, step_fn, delay)
             local ok, err = xpcall(step_fn, debug.traceback)
             if not ok and dl.standby_guard then
                 logger.err("download step failed:", log_error(err))
-                if dl.resumable then
-                    self:_preserveWorkspace(dl, err)
-                else
-                    self:_releaseStandby(dl)
-                    self:_cleanupWorkspace(dl)
-                    if dl.progress_dialog then
-                        dl.progress_dialog:close()
-                        dl.progress_dialog = nil
-                    end
-                    self:_notifyCompletion(dl, false, err)
-                    self:_finishJob(dl)
-                end
+                self:_endFailedJob(dl, err)
                 if not dl.prefetch then
                     self.show_info(T(_("Download failed:\n%1"), display_error(err)))
                 end
@@ -780,11 +811,22 @@ function Downloader:_skipCompletedChapterBatch(dl)
 end
 
 function Downloader:_retryChapterSource(dl, err)
+    if self.is_connected and not self.is_connected() then
+        self:_pauseOffline(dl, "link_down")
+        return false
+    end
     local chapter = dl.chapters[dl.index]
     local uid = tostring(chapter and chapter.chapterUid or dl.index)
     dl.chapter_source_retries = dl.chapter_source_retries or {}
     local attempt = (dl.chapter_source_retries[uid] or 0) + 1
     dl.chapter_source_retries[uid] = attempt
+    -- Socket failures are marked by Client:request. One soft retry for a flaky
+    -- link; a second transport failure pauses the whole job (do not skip chapters).
+    if is_transport_error(err) and attempt > 1 then
+        dl.chapter_source_retries[uid] = nil
+        self:_pauseOffline(dl, err)
+        return false
+    end
     if attempt > 2 then
         dl.chapter_source_retries[uid] = nil
         self:_failChapter(dl, err)
@@ -813,14 +855,7 @@ end
 
 function Downloader:_footnoteStep(dl)
     if dl.cancelled then
-        if dl.resumable then
-            self:_preserveWorkspace(dl, dl.cancel_reason or "cancelled")
-        else
-            self:_releaseStandby(dl)
-            self:_cleanupWorkspace(dl)
-            self:_notifyCompletion(dl, false, dl.cancel_reason or "cancelled")
-            self:_finishJob(dl)
-        end
+        self:_endFailedJob(dl, dl.cancel_reason or "cancelled")
         if not dl.prefetch then
             self.show_transient(_("Download cancelled"), 2)
         end
@@ -953,6 +988,12 @@ function Downloader:_finishChapter(dl)
     if not dl.current then return end
     local chapter = dl.current.chapter
     local cache = self.settings:get("cache")
+    -- Image packaging is network-heavy; bail before opening long HTTP waits.
+    if cache.download_book_images
+        and self.is_connected and not self.is_connected() then
+        self:_pauseOffline(dl, "link_down")
+        return
+    end
     local stage_text
     if cache.download_book_images then
         stage_text = T(_("Downloading images · chapter %1/%2"), tostring(dl.index), tostring(dl.total))
@@ -974,12 +1015,40 @@ function Downloader:_finishChapter(dl)
     if dl.cancelled then self:_step(dl); return end
     self:_perf(dl, "images_and_finalize", started, "ok=", tostring(ok))
     if not ok then
+        if self.is_connected and not self.is_connected() then
+            self:_pauseOffline(dl, "link_down")
+            return
+        end
+        if is_transport_error(result) then
+            local uid = tostring(chapter.chapterUid or dl.index)
+            dl.chapter_finalize_retries = dl.chapter_finalize_retries or {}
+            local attempt = (dl.chapter_finalize_retries[uid] or 0) + 1
+            dl.chapter_finalize_retries[uid] = attempt
+            if attempt > 1 then
+                dl.chapter_finalize_retries[uid] = nil
+                self:_pauseOffline(dl, result)
+                return
+            end
+            logger.warn("chapter finalize transport failed; retrying:",
+                "index=", tostring(dl.index) .. "/" .. tostring(dl.total),
+                "chapter_uid=", uid, "attempt=", tostring(attempt),
+                "error=", log_error(result))
+            self:_setStage(dl,
+                T(_("Retrying chapter %1/%2 · attempt %3"),
+                    tostring(dl.index), tostring(dl.total), tostring(attempt)),
+                dl.index - 0.1)
+            self:_scheduleGuarded(dl, function() self:_finishChapter(dl) end, 0.8)
+            return
+        end
         self:_failChapter(dl, result)
         return
     end
     local xhtml, chapter_assets = result.xhtml, result.assets
     dl.state = result.state
     local uid = tostring(chapter.chapterUid or dl.index)
+    if dl.chapter_finalize_retries then
+        dl.chapter_finalize_retries[uid] = nil
+    end
     if dl.resumable then
         Content.save_full_download_css(dl.workspace, dl.state.css)
         Content.save_full_download_chapter(dl.workspace, chapter, dl.index, xhtml)
@@ -1013,14 +1082,7 @@ end
 
 function Downloader:_step(dl)
     if dl.cancelled then
-        if dl.resumable then
-            self:_preserveWorkspace(dl, dl.cancel_reason or "cancelled")
-        else
-            self:_releaseStandby(dl)
-            self:_cleanupWorkspace(dl)
-            self:_notifyCompletion(dl, false, dl.cancel_reason or "cancelled")
-            self:_finishJob(dl)
-        end
+        self:_endFailedJob(dl, dl.cancel_reason or "cancelled")
         if not dl.prefetch then
             self.show_transient(_("Download cancelled"), 2)
         end
@@ -1048,31 +1110,20 @@ function Downloader:_step(dl)
         -- structurally valid but truncated book and replaces any previous good
         -- cache. Explicit single- or multi-chapter jobs remain best-effort.
         if dl.suffix == "full" and #dl.failed > 0 then
-            if dl.progress_dialog then
-                dl.progress_dialog:close()
-                dl.progress_dialog = nil
-            end
-            if dl.resumable then
-                self:_preserveWorkspace(dl, "incomplete_full_book")
-            else
-                self:_releaseStandby(dl)
-                self:_cleanupWorkspace(dl)
-            end
+            local resumable = dl.resumable
+            local failed_count, total = #dl.failed, dl.total
             logger.warn(
                 "full-book download aborted after chapter failures:",
                 "success=", tostring(#dl.selected),
-                "failed=", tostring(#dl.failed),
-                "total=", tostring(dl.total)
+                "failed=", tostring(failed_count),
+                "total=", tostring(total)
             )
-            if not dl.resumable then
-                self:_notifyCompletion(dl, false, "incomplete_full_book")
-                self:_finishJob(dl)
-            end
+            self:_endFailedJob(dl, "incomplete_full_book")
             if not dl.prefetch then
-                local message = dl.resumable
+                local message = resumable
                     and "Full-book download paused: %1 of %2 chapters failed.\n\nCompleted chapters were kept. Choose Download full book again to continue."
                     or "Full-book download stopped: %1 of %2 chapters failed.\n\nNo incomplete EPUB was saved. Please retry the download."
-                self.show_info(T(_(message), tostring(#dl.failed), tostring(dl.total)))
+                self.show_info(T(_(message), tostring(failed_count), tostring(total)))
             end
             return
         end
@@ -1310,6 +1361,13 @@ function Downloader:_step(dl)
     end
 
     if dl.resumable and self:_skipCompletedChapterBatch(dl) then return end
+
+    -- Link-state only: never call isOnline()/DNS on the UI loop. When Wi-Fi is
+    -- down, fail immediately instead of blocking on socket connect/DNS.
+    if self.is_connected and not self.is_connected() then
+        self:_pauseOffline(dl, "link_down")
+        return
+    end
 
     local chapter = dl.chapters[dl.index]
     self:_setStage(dl,

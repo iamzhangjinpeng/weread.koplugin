@@ -26,7 +26,7 @@ local _ = PluginUtil.tr
 local WeReadPlugin = WidgetContainer:extend{
     name = "weread",
     is_doc_only = false,
-    version = "1.6.111",
+    version = "1.6.112",
 }
 
 -- Stable entry point used by third-party launchers such as SimpleUI and ZenUI.
@@ -83,7 +83,8 @@ function WeReadPlugin:init()
         safe_callback   = function(label, fn) return self:safeCallback(label, fn) end,
         require_login   = function(cookie, api_key) return self:requireLogin(cookie, api_key) end,
         run_online_task = function(label, fn)
-            return self:runOnlineTask(label, fn)
+            -- Book downloads must not block the UI on NetworkMgr:isOnline() DNS.
+            return self:runOnlineTask(label, fn, nil, { link_only = true })
         end,
         is_connected = function()
             return self:isNetworkConnected()

@@ -283,6 +283,7 @@ local zh = {
     ["No official API key was returned. This account has not enabled WeRead Skill.\n\nOpen WeRead app → Me → Settings → WeRead Skill → Get API Key, then scan again."] = "未返回官方 API Key，说明当前账号尚未开通微信读书 Skill。\n\n请打开微信读书 App → 我 → 设置 → 微信读书 Skill → 获取 API Key，生成后重新扫码登录。此次登录未保存任何凭证。",
     ["%1 failed:\n%2"] = "%1 失败：\n%2",
     ["No network connection. Please connect Wi-Fi and try again."] = "当前没有网络连接，请连接 Wi-Fi 后重试。",
+    ["Network disconnected during download.\n\nCompleted chapters were kept. Choose Download full book again to continue."] = "下载过程中网络已断开。\n\n已完成章节已保留，再次选择“下载全书”即可继续。",
     ["No items."] = "没有条目。",
     ["Cancel"] = "取消",
     ["Please scan the QR code to log in first."] = "请先微信扫码登录。",

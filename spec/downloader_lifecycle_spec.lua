@@ -55,7 +55,7 @@ package.preload["weread.lib.content"] = function()
     return {
         ensure_reader_state = function() end,
         fetch_single_chapter_source = function()
-            error("injected transient timeout")
+            error("injected transient server error")
         end,
     }
 end
@@ -357,5 +357,119 @@ dl.trapper = { dismissableRunInSubprocess = function() return false end }
 local worker_ok, worker_err = pcall(downloader._runInterruptible, downloader, dl, function() end)
 expect(not worker_ok and tostring(worker_err):find("could not start download worker", 1, true)
     and not dl.cancelled, "worker launch failure was mistaken for user cancellation")
+
+-- Dropping Wi-Fi mid-download must clear the active job so retry does not
+-- require restarting KOReader, and resumable checkpoints stay on disk.
+local offline_cleanup = 0
+Content.cleanup_download_workspace = function() offline_cleanup = offline_cleanup + 1 end
+local offline_messages = {}
+downloader.show_info = function(text) offline_messages[#offline_messages + 1] = text end
+downloader.is_connected = function() return false end
+local offline_done, offline_reason = false, nil
+local offline_dl = {
+    book = { title = "Book" },
+    chapters = chapters,
+    total = 2,
+    index = 2,
+    selected = { chapters[1] },
+    bodies = {},
+    state = {},
+    assets = {},
+    failed = {},
+    standby_guard = true,
+    resumable = true,
+    completed = { true },
+    completed_count = 1,
+    workspace = { keep = true },
+    on_complete = function(ok, reason)
+        offline_done = true
+        offline_reason = reason
+    end,
+}
+downloader._active_job = offline_dl
+downloader:_beginStandby()
+downloader:_step(offline_dl)
+expect(offline_done and offline_reason == "offline"
+    and downloader._active_job == nil and downloader._standby_ref == 0,
+    "offline pause did not finish the resumable job")
+expect(offline_cleanup == 0, "offline pause deleted the resumable workspace")
+expect(#offline_messages == 1
+    and offline_messages[1]:find("Completed chapters were kept", 1, true),
+    "offline pause did not explain resume")
+
+-- A repeated Client:request transport marker must stop the whole job instead of
+-- walking every remaining chapter. Local errors like "truncated TAR" must not.
+Content.fetch_single_chapter_source = function()
+    error("weread.transport:timeout")
+end
+local transport_messages = {}
+downloader.show_info = function(text) transport_messages[#transport_messages + 1] = text end
+downloader.is_connected = function() return true end
+local transport_done, transport_reason = false, nil
+local transport_dl = {
+    book = { title = "Book", book_id = "book" },
+    chapters = {
+        { chapterUid = 1, title = "One" },
+        { chapterUid = 2, title = "Two" },
+    },
+    total = 2,
+    index = 1,
+    selected = {},
+    bodies = {},
+    state = {},
+    assets = {},
+    failed = {},
+    standby_guard = true,
+    resumable = true,
+    completed = {},
+    completed_count = 0,
+    workspace = { keep = true },
+    on_complete = function(ok, reason)
+        transport_done = true
+        transport_reason = reason
+    end,
+}
+downloader._active_job = transport_dl
+downloader:_beginStandby()
+downloader:_step(transport_dl)
+expect(transport_dl.index == 1 and not transport_done,
+    "first transport failure must soft-retry once")
+scheduled[#scheduled]()
+expect(transport_done and transport_reason == "offline"
+    and downloader._active_job == nil and downloader._standby_ref == 0,
+    "repeated transport failure did not pause the whole download")
+expect(#transport_dl.failed == 0, "transport pause must not mark remaining chapters failed")
+expect(#transport_messages == 1
+    and transport_messages[1]:find("Completed chapters were kept", 1, true),
+    "transport pause did not explain resume")
+
+Content.fetch_single_chapter_source = function()
+    error("truncated TAR entry")
+end
+local local_done = false
+local local_dl = {
+    book = { title = "Book", book_id = "book" },
+    chapters = { { chapterUid = 9, title = "Nine" } },
+    total = 1,
+    index = 1,
+    selected = {},
+    bodies = {},
+    state = {},
+    assets = {},
+    failed = {},
+    standby_guard = true,
+    on_complete = function() local_done = true end,
+}
+downloader._active_job = local_dl
+downloader:_beginStandby()
+local scheduled_before_local = #scheduled
+downloader:_step(local_dl)
+expect(local_dl.index == 1 and not local_done
+    and #scheduled == scheduled_before_local + 1,
+    "local truncated TAR must soft-retry as a chapter error, not pause offline")
+scheduled[#scheduled]()
+scheduled[#scheduled]()
+expect(local_dl.index == 2 and local_dl.failed[1] == "9" and not local_done,
+    "local truncated TAR must fail the chapter instead of whole-job offline pause")
 
 print(("downloader_lifecycle_spec: %d checks"):format(checks))

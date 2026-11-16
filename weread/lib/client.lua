@@ -10,9 +10,28 @@ if not ok_json then
     ok_json, json = pcall(require, "rapidjson")
 end
 
+-- Block timeout bounds a single socket I/O wait. Total timeout caps the whole
+-- request so a half-open or slowly dripping connection cannot stall forever.
 local DEFAULT_TIMEOUT_SECONDS = 15
+local DEFAULT_TOTAL_TIMEOUT_SECONDS = 90
+local BINARY_BLOCK_TIMEOUT_SECONDS = 30
+local BINARY_TOTAL_TIMEOUT_SECONDS = 180
+-- Survives tostring()/traceback/subprocess so download can pause the whole job
+-- without mistaking HTTP business text or local "truncated TAR" errors for offline.
+local TRANSPORT_PREFIX = "weread.transport:"
+
+local function transport_error(cause)
+    return TRANSPORT_PREFIX .. tostring(cause or "failed")
+end
+
+local function is_transport_error(err)
+    return tostring(err or ""):find(TRANSPORT_PREFIX, 1, true) ~= nil
+end
+
 local Client = {}
 Client.__index = Client
+Client.transport_error = transport_error
+Client.is_transport_error = is_transport_error
 
 local function header_value(headers, name)
     if type(headers) ~= "table" or type(name) ~= "string" then return nil end
@@ -245,12 +264,13 @@ function Client:request(opts)
         headers["Content-Length"] = tostring(#body)
     end
     local block_timeout = DEFAULT_TIMEOUT_SECONDS
-    local total_timeout = -1
+    local total_timeout = DEFAULT_TOTAL_TIMEOUT_SECONDS
     if type(opts.timeout) == "table" and opts.timeout[1] then
         block_timeout = opts.timeout[1]
         total_timeout = opts.timeout[2] or block_timeout
     elseif type(opts.timeout) == "number" then
         block_timeout = opts.timeout
+        total_timeout = opts.timeout
     end
     socketutil:set_timeout(block_timeout, total_timeout)
 
@@ -301,7 +321,7 @@ function Client:request(opts)
             "api=", tostring(diagnostic_api or "unknown"),
             "error=", tostring(results[2])
         )
-        error(results[2])
+        error(transport_error(results[2]), 0)
     end
     local _, raw_code, resp_headers, status = results[2], results[3], results[4], results[5]
     if status == nil and type(raw_code) == "string" then
@@ -536,6 +556,9 @@ end
 
 function Client:get_binary(url, opts)
     opts = opts or {}
+    if opts.timeout == nil then
+        opts.timeout = { BINARY_BLOCK_TIMEOUT_SECONDS, BINARY_TOTAL_TIMEOUT_SECONDS }
+    end
     local req_opts = merge_req_opts(opts, {
         maxredirects = 5,
         headers = {

@@ -130,18 +130,36 @@ expect(reset_count == 1, "timeout was not reset after successful request")
 expect(merged_cookies[1] == "wr_ticket=new-ticket; Path=/",
     "response cookies were not persisted")
 
+responses[#responses + 1] = { body = "ok", code = 200 }
+timeout_calls = {}
+client:request({ url = "https://weread.qq.com/web/default-timeout" })
+expect(timeout_calls[1] and timeout_calls[1][1] == 15 and timeout_calls[1][2] == 90,
+    "default request total timeout was not applied")
+
+responses[#responses + 1] = { body = "bin", code = 200 }
+timeout_calls = {}
+client:get_binary("https://cdn.example.net/asset.bin")
+expect(timeout_calls[1] and timeout_calls[1][1] == 30 and timeout_calls[1][2] == 180,
+    "default binary total timeout was not applied")
+
 responses[#responses + 1] = { body = "public", code = 200 }
 client:request({ url = "https://example.com/public" })
-expect(requests[2].headers.Cookie == nil,
+expect(requests[#requests].headers.Cookie == nil,
     "WeRead cookie leaked to a non-WeRead host")
 
+local reset_before_transport = reset_count
 responses[#responses + 1] = { raise = "transport failed" }
 local ok, err = pcall(function()
     client:request({ url = "https://weread.qq.com/web/fail" })
 end)
-expect(not ok and tostring(err):find("transport failed", 1, true),
-    "transport error was not propagated")
-expect(reset_count == 3, "timeout was not reset after transport error")
+expect(not ok and Client.is_transport_error(err)
+    and tostring(err):find("transport failed", 1, true),
+    "transport error was not marked for download offline pause")
+expect(not Client.is_transport_error("truncated TAR entry")
+    and not Client.is_transport_error("HTTP 403, error_message=closed for sale"),
+    "non-transport errors must not look like socket failures")
+expect(reset_count == reset_before_transport + 1,
+    "timeout was not reset after transport error")
 
 responses[#responses + 1] = {
     body = "",

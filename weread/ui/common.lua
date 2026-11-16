@@ -124,7 +124,18 @@ function M:showOffline(label)
 end
 
 function M:runOnlineTask(label, callback, delay, options)
-    if not self:isNetworkOnline() then
+    -- link_only uses interface state and never resolves DNS on the UI thread.
+    -- Download/start paths should prefer it; Internet reachability is proven by
+    -- the cancellable HTTP work that follows.
+    local online
+    if options and options.skip_online_check then
+        online = true
+    elseif options and options.link_only then
+        online = self:isNetworkConnected()
+    else
+        online = self:isNetworkOnline()
+    end
+    if not online then
         if not (options and options.silent_offline) then
             self:showOffline(label)
         end
