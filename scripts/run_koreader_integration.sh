@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Changes to this file also retrigger the KOReader integration workflow (and
+# thus the automatic Release job) via its path filter on main.
 set -euo pipefail
 
 readonly KOREADER_TESTED_COMMIT="1e2fa5f1239028ab4b37acae833cdc86a71e5258"
