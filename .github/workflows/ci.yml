@@ -12,8 +12,11 @@ jobs:
     name: Basic checks
     runs-on: ubuntu-latest
     env:
-      # Keep this in sync with scripts/run_koreader_integration.sh.
+      # Keep these in sync with scripts/run_koreader_integration.sh.
+      # KOREADER_BASE_COMMIT is the `base` submodule SHA at KOREADER_COMMIT;
+      # ffi/*.lua lives there, not in the top-level koreader tree.
       KOREADER_COMMIT: 1e2fa5f1239028ab4b37acae833cdc86a71e5258
+      KOREADER_BASE_COMMIT: 6232b2604873f1aa2b847f95d0364d6f90aa1d3a
 
     steps:
       - name: Checkout
@@ -25,7 +28,7 @@ jobs:
           sudo apt-get install -y luajit luarocks ripgrep libsqlite3-0
           sudo luarocks install luacheck
 
-      - name: Checkout pinned KOReader module tree
+      - name: Checkout pinned KOReader frontend
         uses: actions/checkout@v6
         with:
           repository: koreader/koreader
@@ -33,8 +36,16 @@ jobs:
           path: .koreader-modules
           sparse-checkout: |
             frontend
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout pinned koreader-base (ffi)
+        uses: actions/checkout@v6
+        with:
+          repository: koreader/koreader-base
+          ref: ${{ env.KOREADER_BASE_COMMIT }}
+          path: .koreader-modules/base
+          sparse-checkout: |
             ffi
-            common
           sparse-checkout-cone-mode: true
 
       - name: KOReader module paths

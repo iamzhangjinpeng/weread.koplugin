@@ -57,11 +57,16 @@ def lua_files(repo_root):
 def module_exists(koreader_root, module):
     if module.startswith("libs/"):
         return True
-    if module in C_MODULES:
+    # Lua accepts both socket.http and socket/http; keep the allowlist dotted.
+    dotted = module.replace("/", ".")
+    if module in C_MODULES or dotted in C_MODULES:
         return True
     relative = module.replace(".", "/")
+    # ffi/*.lua ships in the koreader-base submodule (checked out as base/).
     search_roots = (
         os.path.join(koreader_root, "frontend"),
+        os.path.join(koreader_root, "base", "ffi"),
+        os.path.join(koreader_root, "base"),
         os.path.join(koreader_root, "ffi"),
         os.path.join(koreader_root, "common"),
         koreader_root,
@@ -71,6 +76,14 @@ def module_exists(koreader_root, module):
             return True
         if os.path.isfile(os.path.join(root, relative, "init.lua")):
             return True
+        # require("ffi/blitbuffer") already includes the ffi/ prefix; also try
+        # resolving that same relative path directly under base/ffi/.
+        if relative.startswith("ffi/") and root.endswith(os.path.join("base", "ffi")):
+            nested = relative[len("ffi/") :]
+            if os.path.isfile(os.path.join(root, nested + ".lua")):
+                return True
+            if os.path.isfile(os.path.join(root, nested, "init.lua")):
+                return True
     return False
 
 
