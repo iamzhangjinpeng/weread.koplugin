@@ -813,9 +813,6 @@ function Downloader:_skipCompletedChapterBatch(dl)
     self:_setStage(dl,
         T(_("Resuming downloaded chapter %1/%2"),
             tostring(dl.index - 1), tostring(dl.total)), dl.index - 1)
-    if dl.progress_dialog then
-        dl.progress_dialog:reportProgress(dl.index - 1)
-    end
     logger.info("resumed completed chapter batch:",
         "first=", tostring(first_index), "count=", tostring(skipped),
         "total=", tostring(dl.total))
@@ -901,13 +898,13 @@ function Downloader:_footnoteStep(dl)
 
     local chapter = (job.chapters or dl.selected)[job.index]
     local uid = tostring(chapter.chapterUid or job.index)
-    -- Chapter bodies are already downloaded, so the bar is at/near total.
-    -- Only refresh the title here: passing dl.total again does not move the
-    -- bar, and inventing a second-phase scale would either rewind it or need
-    -- a larger progress_max.
+    -- Chapter bodies are already downloaded. Keep stage_progress at dl.total
+    -- so a dialog rebuild still shows chapter-download completion while the
+    -- title tracks the footnote pass.
     self:_setStage(dl,
         T(_("Processing footnotes · chapter %1/%2"),
-            tostring(job.index), tostring(#dl.selected)))
+            tostring(job.index), tostring(#dl.selected)),
+        dl.total)
     local original = dl.bodies[uid]
     if dl.resumable then
         original = Content.load_full_download_chapter(
