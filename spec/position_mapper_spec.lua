@@ -121,8 +121,8 @@ test("remote keeps WeRead progress and exposes offset percent", function()
 end)
 
 test("full book percent follows mapped chapter offset not page fraction alone", function()
-    -- Words are front-loaded in early chapters; a mid-book page fraction still
-    -- maps into chapter 2, and the reported percent must match that offset.
+    -- Words are front-loaded: a 50% document fraction still lands in chapter 1,
+    -- and the reported percent must match that chapter/offset word position.
     local uneven = {
         { chapterUid = 1, chapterIdx = 1, wordCount = 800 },
         { chapterUid = 2, chapterIdx = 2, wordCount = 100 },
@@ -148,6 +148,21 @@ test("compare uses offset percent when progress field lags", function()
         2
     )
     eq(state, "same", "stale progress ignored when offset agrees")
+end)
+
+test("same_position prefers chapter offset over display percent", function()
+    eq(Mapper.same_position(
+        { percent = 25, chapter_uid = 22, chapter_offset = 150 },
+        { percent = 99, offset_percent = 25, chapter_uid = 22, chapter_offset = 150 }
+    ), true, "matching offsets ignore stale display percent")
+    eq(Mapper.same_position(
+        { percent = 25, chapter_uid = 22, chapter_offset = 150 },
+        { percent = 25, chapter_uid = 22, chapter_offset = 160 }
+    ), false, "offset drift is still different")
+    eq(Mapper.same_position(
+        { percent = 25, offset_percent = 25, chapter_uid = 22 },
+        { percent = 99, offset_percent = 25, chapter_uid = 22 }
+    ), true, "offset_percent used when chapter_offset is absent")
 end)
 
 test("remote full book position maps to overall fraction", function()

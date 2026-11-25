@@ -299,11 +299,19 @@ end
 function PositionMapper.same_position(left, right, tolerance)
     if type(left) ~= "table" or type(right) ~= "table" then return false end
     tolerance = math.max(0, tonumber(tolerance) or 0.5)
-    return math.abs((tonumber(left.percent) or 0) - (tonumber(right.percent) or 0))
-            <= tolerance
-        and tostring(left.chapter_uid or "") == tostring(right.chapter_uid or "")
-        and math.abs((tonumber(left.chapter_offset) or 0)
-            - (tonumber(right.chapter_offset) or 0)) <= 1
+    if tostring(left.chapter_uid or "") ~= tostring(right.chapter_uid or "") then
+        return false
+    end
+    local left_offset = tonumber(left.chapter_offset)
+    local right_offset = tonumber(right.chapter_offset)
+    if left_offset ~= nil and right_offset ~= nil then
+        -- Offset is authoritative when both sides have it, matching compare()'s
+        -- preference for offset_percent over a possibly stale display percent.
+        return math.abs(left_offset - right_offset) <= 1
+    end
+    local left_percent = tonumber(left.offset_percent) or tonumber(left.percent) or 0
+    local right_percent = tonumber(right.offset_percent) or tonumber(right.percent) or 0
+    return math.abs(left_percent - right_percent) <= tolerance
 end
 
 return PositionMapper
