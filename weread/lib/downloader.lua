@@ -697,7 +697,16 @@ function Downloader:start(book, chapters, suffix, options)
                 dl.state.css = Content.load_full_download_css(dl.workspace)
                 dl.state.used_asset_names = Content.full_download_workspace_used_asset_names(
                     dl.workspace)
-                self:_restoreFullDownloadCheckpoint(dl)
+                local completed_count = self:_restoreFullDownloadCheckpoint(dl)
+                -- Seed the dialog from the checkpoint immediately. Waiting for
+                -- _skipCompletedChapterBatch (25 chapters at a time) left the
+                -- bar at 0% while the title eventually jumped ahead.
+                if completed_count > 0 then
+                    self:_setStage(dl,
+                        T(_("Resuming downloaded chapter %1/%2"),
+                            tostring(completed_count), tostring(dl.total)),
+                        completed_count)
+                end
             elseif cache.download_book_images and Content.create_download_workspace then
                 dl.workspace = Content.create_download_workspace(
                     self.settings, book)
@@ -756,10 +765,14 @@ function Downloader:_setStage(dl, title, progress)
     dl.stage_title = title
     dl.stage_progress = progress
     if not dl.progress_dialog then return end
-    dl.progress_dialog:setTitle(title)
+    -- Update the bar before setTitle repaints. DownloadDialog throttles
+    -- reportProgress paints to ~3s, while setTitle always force-repaints; if
+    -- the title changes first, the user sees a new chapter count with a stale
+    -- bar (especially visible when resume skips a large completed batch).
     if progress then
         dl.progress_dialog:reportProgress(progress)
     end
+    dl.progress_dialog:setTitle(title)
 end
 
 function Downloader:_perf(dl, stage, started, ...)
@@ -888,9 +901,13 @@ function Downloader:_footnoteStep(dl)
 
     local chapter = (job.chapters or dl.selected)[job.index]
     local uid = tostring(chapter.chapterUid or job.index)
+    -- Chapter bodies are already downloaded, so the bar is at/near total.
+    -- Only refresh the title here: passing dl.total again does not move the
+    -- bar, and inventing a second-phase scale would either rewind it or need
+    -- a larger progress_max.
     self:_setStage(dl,
         T(_("Processing footnotes · chapter %1/%2"),
-            tostring(job.index), tostring(#dl.selected)), dl.total)
+            tostring(job.index), tostring(#dl.selected)))
     local original = dl.bodies[uid]
     if dl.resumable then
         original = Content.load_full_download_chapter(

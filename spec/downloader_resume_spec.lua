@@ -66,14 +66,23 @@ end
 package.preload["weread.lib.i18n"] = function()
     return { tr = function(text) return text end }
 end
+local progress_events = {}
 package.preload["weread.ui.download_dialog"] = function()
     return {
         new = function(_self, _options)
             return {
                 show = function() end,
                 close = function() end,
-                setTitle = function() end,
-                reportProgress = function() end,
+                setTitle = function(_dialog, title)
+                    progress_events[#progress_events + 1] = {
+                        kind = "title", title = title,
+                    }
+                end,
+                reportProgress = function(_dialog, progress)
+                    progress_events[#progress_events + 1] = {
+                        kind = "progress", progress = progress,
+                    }
+                end,
             }
         end,
     }
@@ -181,6 +190,18 @@ while #scheduled > 0 do
     callback()
 end
 
+local seeded_resume
+for _i, event in ipairs(progress_events) do
+    if event.kind == "progress" and event.progress == 1 then
+        local title_event = progress_events[_i + 1]
+        seeded_resume = title_event and title_event.kind == "title"
+            and tostring(title_event.title or ""):find("1/2", 1, true)
+        break
+    end
+end
+expect(seeded_resume,
+    "resume did not seed the progress bar from the checkpoint before painting the title")
+
 expect(#fetched == 1 and fetched[1] == 2,
     "resume should fetch only the unfinished chapter")
 expect(#checkpointed >= 1 and checkpointed[1].uid == 2
@@ -262,5 +283,26 @@ expect(batch_dl.index == 26,
     "resume batch should yield after 25 completed chapters")
 expect(#scheduled == 1,
     "resume batch should schedule one continuation instead of one per chapter")
+
+progress_events = {}
+local order_dl = {
+    total = 10,
+    progress_dialog = {
+        setTitle = function(_self, title)
+            progress_events[#progress_events + 1] = { kind = "title", title = title }
+        end,
+        reportProgress = function(_self, progress)
+            progress_events[#progress_events + 1] = {
+                kind = "progress", progress = progress,
+            }
+        end,
+    },
+}
+downloader:_setStage(order_dl, "Downloading chapter 6/10", 5)
+expect(#progress_events == 2
+        and progress_events[1].kind == "progress"
+        and progress_events[1].progress == 5
+        and progress_events[2].kind == "title",
+    "_setStage must update the bar before the title repaint")
 
 print(("downloader_resume_spec: %d checks"):format(checks))
