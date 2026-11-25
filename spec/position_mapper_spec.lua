@@ -108,15 +108,46 @@ test("single chapter requires a known chapter", function()
     eq(reason, "current_chapter_not_found", "reason")
 end)
 
-test("remote offset is authoritative", function()
+test("remote keeps WeRead progress and exposes offset percent", function()
     local normalized = assert(Mapper.normalize_remote({
         progress = 99,
         chapterUid = 22,
         chapterIdx = 2,
         chapterOffset = 150,
     }, "book", "gateway", chapters))
-    near(normalized.percent, 25, 0.0001, "recomputed percent")
+    eq(normalized.percent, 99, "official WeRead progress preserved")
+    near(normalized.offset_percent, 25, 0.0001, "offset-derived percent")
     eq(normalized.position_basis, "chapter_offset", "basis")
+end)
+
+test("full book percent follows mapped chapter offset not page fraction alone", function()
+    -- Words are front-loaded in early chapters; a mid-book page fraction still
+    -- maps into chapter 2, and the reported percent must match that offset.
+    local uneven = {
+        { chapterUid = 1, chapterIdx = 1, wordCount = 800 },
+        { chapterUid = 2, chapterIdx = 2, wordCount = 100 },
+        { chapterUid = 3, chapterIdx = 3, wordCount = 100 },
+    }
+    local position = assert(Mapper.local_to_remote(uneven, 0.5, {
+        is_full_book = true,
+    }))
+    eq(position.chapter_uid, 1, "chapter from word mapping")
+    eq(position.chapter_offset, 500, "offset from word mapping")
+    eq(position.percent, 50, "percent matches chapter/offset words")
+    near(position.fraction, 0.5, 0.0001, "fraction matches words")
+end)
+
+test("compare uses offset percent when progress field lags", function()
+    local state = Mapper.compare(
+        { percent = 25, chapter_uid = 22 },
+        {
+            percent = 99,
+            offset_percent = 25,
+            chapter_uid = 22,
+        },
+        2
+    )
+    eq(state, "same", "stale progress ignored when offset agrees")
 end)
 
 test("remote full book position maps to overall fraction", function()
@@ -173,6 +204,7 @@ test("missing remote offset falls back to raw percent", function()
     }, "book", "web", chapters))
     eq(normalized.position_basis, "raw_percent", "basis")
     eq(normalized.percent, 40, "raw percent preserved")
+    eq(normalized.offset_percent, 40, "offset percent mirrors raw")
 end)
 
 print(string.format("position_mapper_spec: %d checks, %d failure(s)", checks, failures))
