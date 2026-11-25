@@ -82,6 +82,12 @@ function PositionMapper.catalog(chapters)
     return catalog(chapters)
 end
 
+local function percent_points(fraction)
+    -- WeRead stores/displays integer 0–100. Round to nearest instead of
+    -- truncating so uploaded `pr` stays aligned with the official app.
+    return math.floor(clamp(fraction, 0, 1) * 100 + 0.5)
+end
+
 function PositionMapper.normalize_remote(value, book_id, source, chapters)
     local node = find_progress_node(value, book_id)
     if not node then return nil, "progress_not_found" end
@@ -95,6 +101,9 @@ function PositionMapper.normalize_remote(value, book_id, source, chapters)
     )
     local remote = {
         book_id = raw_field(node, "bookId", "book_id") or book_id,
+        -- Keep WeRead's official progress for UI/compare against the app.
+        -- Overwriting it with a local word-count recompute made the plugin
+        -- show a different "WeRead: N%" than the WeRead client.
         percent = clamp(percent, 0, 100),
         raw_percent = percent,
         chapter_uid = raw_field(
@@ -119,13 +128,16 @@ function PositionMapper.normalize_remote(value, book_id, source, chapters)
     if item and remote.has_chapter_offset
         and item.words > 0 and map.total_words > 0 then
         local offset = clamp(remote.chapter_offset, 0, item.words)
-        remote.percent = clamp(
+        -- Offset-derived percent is used for ahead/behind decisions when the
+        -- stored progress field lags the chapter cursor.
+        remote.offset_percent = clamp(
             (item.before + offset) / map.total_words * 100,
             0,
             100
         )
         remote.position_basis = "chapter_offset"
     else
+        remote.offset_percent = remote.percent
         remote.position_basis = "raw_percent"
     end
     return remote
@@ -187,7 +199,11 @@ function PositionMapper.local_to_remote(chapters, fraction, options)
         end
         if not selected then return nil, "catalog_empty" end
         offset = clamp(math.floor(target - selected.before), 0, selected.words)
-        overall_fraction = fraction
+        -- Report the word-count percent for the mapped chapter/offset, not the
+        -- raw EPUB page/height fraction. WeRead's progress model is character-
+        -- based; using page fraction here made the plugin % drift (either
+        -- direction) relative to the official app at the same place.
+        overall_fraction = (selected.before + offset) / map.total_words
     else
         local uid = options.current_chapter_uid
         selected = uid ~= nil and map.by_uid[tostring(uid)] or nil
@@ -199,7 +215,7 @@ function PositionMapper.local_to_remote(chapters, fraction, options)
     end
 
     return {
-        percent = math.floor(clamp(overall_fraction, 0, 1) * 100),
+        percent = percent_points(overall_fraction),
         fraction = clamp(overall_fraction, 0, 1),
         chapter_uid = selected.uid,
         chapter_idx = selected.chapter_idx,
@@ -263,8 +279,13 @@ function PositionMapper.compare(local_position, remote, threshold)
         return "unknown", 0
     end
     threshold = math.max(0, tonumber(threshold) or 2)
-    local delta = (tonumber(remote.percent) or 0)
-        - (tonumber(local_position.percent) or 0)
+    -- Prefer offset-derived percent for ordering when present so a stale
+    -- `progress` field cannot hide a real chapter/offset change. UI still
+    -- shows remote.percent (WeRead's official value).
+    local remote_percent = tonumber(remote.offset_percent)
+        or tonumber(remote.percent)
+        or 0
+    local delta = remote_percent - (tonumber(local_position.percent) or 0)
     if local_position.chapter_uid ~= nil and remote.chapter_uid ~= nil
         and tostring(local_position.chapter_uid)
             ~= tostring(remote.chapter_uid)
@@ -278,11 +299,19 @@ end
 function PositionMapper.same_position(left, right, tolerance)
     if type(left) ~= "table" or type(right) ~= "table" then return false end
     tolerance = math.max(0, tonumber(tolerance) or 0.5)
-    return math.abs((tonumber(left.percent) or 0) - (tonumber(right.percent) or 0))
-            <= tolerance
-        and tostring(left.chapter_uid or "") == tostring(right.chapter_uid or "")
-        and math.abs((tonumber(left.chapter_offset) or 0)
-            - (tonumber(right.chapter_offset) or 0)) <= 1
+    if tostring(left.chapter_uid or "") ~= tostring(right.chapter_uid or "") then
+        return false
+    end
+    local left_offset = tonumber(left.chapter_offset)
+    local right_offset = tonumber(right.chapter_offset)
+    if left_offset ~= nil and right_offset ~= nil then
+        -- Offset is authoritative when both sides have it, matching compare()'s
+        -- preference for offset_percent over a possibly stale display percent.
+        return math.abs(left_offset - right_offset) <= 1
+    end
+    local left_percent = tonumber(left.offset_percent) or tonumber(left.percent) or 0
+    local right_percent = tonumber(right.offset_percent) or tonumber(right.percent) or 0
+    return math.abs(left_percent - right_percent) <= tolerance
 end
 
 return PositionMapper
